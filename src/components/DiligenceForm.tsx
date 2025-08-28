@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/api/client';
 
 interface User {
-  id: string;
+  id: number;
   email: string;
   name: string;
   role?: string;
@@ -49,23 +49,27 @@ export default function DiligenceForm({ onClose, onSubmit, initialData }: Dilige
   useEffect(() => {
     const loadUsers = async () => {
       try {
+        console.log('Chargement des utilisateurs depuis API...');
         const response = await apiClient.getUsers();
-        const formattedUsers = response.map((user: User) => ({
-          id: user.id.toString(),
+        console.log('Réponse API utilisateurs:', response);
+        
+        const formattedUsers = response.map((user: { id: number; email?: string; name?: string; role?: string; direction?: string }) => ({
+          id: user.id,
           email: user.email || 'Email non défini',
           name: user.name || user.email || `Utilisateur ${user.id}`,
           role: user.role || 'user',
           direction: user.direction || ''
         }));
 
+        console.log('Utilisateurs formatés:', formattedUsers);
         setUsers(formattedUsers);
       } catch (error) {
         console.error('Erreur lors du chargement des utilisateurs:', error);
         // Fallback en cas d'erreur
         setUsers([
-          { id: '1', email: 'admin@example.com', name: 'Administrateur', role: 'admin' },
-          { id: '2', email: 'user1@example.com', name: 'Utilisateur 1', role: 'user' },
-          { id: '3', email: 'user2@example.com', name: 'Utilisateur 2', role: 'user' }
+          { id: 1, email: 'admin@example.com', name: 'Administrateur', role: 'admin', direction: '' },
+          { id: 2, email: 'user1@example.com', name: 'Utilisateur 1', role: 'user', direction: '' },
+          { id: 3, email: 'user2@example.com', name: 'Utilisateur 2', role: 'user', direction: '' }
         ]);
       } finally {
         setLoadingUsers(false);
@@ -97,7 +101,7 @@ export default function DiligenceForm({ onClose, onSubmit, initialData }: Dilige
   // Mettre à jour automatiquement la direction quand un destinataire est sélectionné
   useEffect(() => {
     if (formData.destinataire.length > 0) {
-      const selectedUserId = formData.destinataire[0]; // Prendre le premier destinataire
+      const selectedUserId = parseInt(formData.destinataire[0]); // Prendre le premier destinataire
       const selectedUser = users.find(user => user.id === selectedUserId);
       
       if (selectedUser && selectedUser.direction) {
@@ -264,7 +268,7 @@ export default function DiligenceForm({ onClose, onSubmit, initialData }: Dilige
                         <option value="">Chargement des utilisateurs...</option>
                       ) : (
                         users.map(user => (
-                          <option key={user.id} value={user.id}>
+                          <option key={user.id} value={user.id.toString()}>
                             {user.name} ({user.email})
                           </option>
                         ))

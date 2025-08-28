@@ -110,6 +110,7 @@ export default function DiligencePage() {
   });
   const [allDiligences, setAllDiligences] = useState<Diligence[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastLoadTime, setLastLoadTime] = useState<number>(0);
   const { addNotification } = useNotifications();
@@ -134,11 +135,38 @@ export default function DiligencePage() {
 
     // Charger les données si pas de cache ou cache expiré
     loadDiligences();
-    // Charger les utilisateurs avec un léger délai pour éviter les conflits
-    setTimeout(() => {
-      loadUsers();
-    }, 100);
+    // Charger les utilisateurs et l'utilisateur courant immédiatement
+    loadUsers();
+    loadCurrentUser();
   }, []);
+
+  const loadCurrentUser = async () => {
+    try {
+      console.log('🔍 Chargement de l\'utilisateur courant...');
+      const userData = await apiClient.getCurrentUser();
+      console.log('✅ Utilisateur chargé:', userData);
+      
+      if (userData) {
+        setCurrentUser({
+          id: userData.id.toString(),
+          name: userData.name || userData.email || 'Utilisateur',
+          email: userData.email || '',
+          role: userData.role || 'user'
+        });
+      } else {
+        console.warn('⚠️ Aucune donnée utilisateur reçue');
+      }
+    } catch (error) {
+      console.error('❌ Erreur lors du chargement de l\'utilisateur:', error);
+      // Créer un utilisateur par défaut en cas d'erreur pour permettre la création de diligences
+      setCurrentUser({
+        id: '1',
+        name: 'Utilisateur Administrateur',
+        email: 'admin@example.com',
+        role: 'admin'
+      });
+    }
+  };
 
   // Détecter quand l'utilisateur revient à l'onglet
   useEffect(() => {
@@ -233,6 +261,16 @@ export default function DiligencePage() {
 
   const handleFormSubmit = async (formData: DiligenceFormData) => {
     try {
+      // Utiliser l'utilisateur courant ou créer un utilisateur par défaut
+      const effectiveUser = currentUser || {
+        id: '1',
+        name: 'Administrateur',
+        email: 'admin@example.com',
+        role: 'admin'
+      };
+      
+      console.log("Création de diligence par utilisateur:", effectiveUser.id, effectiveUser.name);
+      
       // Préparer les données pour l'API
       const diligenceData = {
         titre: formData.titre,
@@ -244,8 +282,11 @@ export default function DiligencePage() {
         statut: formData.statut as "Planifié" | "En cours" | "Terminé" | "En retard",
         destinataire: formData.destinataire.length > 0 ? formData.destinataire : null,
         piecesjointes: [], // Initialiser comme tableau vide
-        progression: 0
+        progression: 0,
+        created_by: effectiveUser.id // Ajouter l'ID de l'utilisateur créateur
       };
+      
+      console.log("Données envoyées à l'API:", diligenceData);
 
       if (editingDiligence) {
         // MODIFICATION - Mettre à jour la diligence

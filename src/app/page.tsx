@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { apiClient } from "@/lib/api/client";
 import { useNotifications } from "@/contexts/NotificationContext";
+import { useStatsEvolution } from "@/hooks/useStatsEvolution";
 
 interface Echeance {
   id: number;
@@ -29,6 +30,8 @@ interface Statistics {
   diligencesPlanifiees: number;
   diligencesEnRetard: number;
   tauxCompletion: number;
+  evolutionEnCours: number; // Pourcentage d'évolution des diligences en cours
+  evolutionTerminees: number; // Pourcentage d'évolution des diligences terminées
   utilisateursActifs?: number;
   documentsTraites?: number;
   rapportsGeneres?: number;
@@ -36,8 +39,26 @@ interface Statistics {
   mesRapports?: number;
 }
 
+interface DestinataireDetail {
+  id: number | string;
+  name: string;
+  email?: string;
+}
+
 interface DiligenceData {
+  id: number;
+  titre: string;
   statut: string;
+  piecesJointes?: string[];
+  destinataire?: string[];
+  destinataire_details?: DestinataireDetail[];
+  assigned_to?: number;
+  created_by?: number;
+  dateFin?: string;
+  priorite?: string;
+  progression?: number;
+  client?: string;
+  nom?: string;
   // autres propriétés si nécessaire
 }
 
@@ -48,7 +69,10 @@ export default function DashboardPage() {
   const [selectedDiligence, setSelectedDiligence] = useState<Echeance | null>(null);
   const [stats, setStats] = useState<Statistics | null>(null);
   const [diligencesData, setDiligencesData] = useState<DiligenceData[]>([]);
+  const [usersData, setUsersData] = useState<User[]>([]);
+  const [previousStats, setPreviousStats] = useState<Statistics | null>(null);
   const { addNotification } = useNotifications();
+  const { stats: evolutionStats } = useStatsEvolution();
 
   useEffect(() => {
     const checkUser = async () => {
@@ -86,7 +110,103 @@ export default function DashboardPage() {
           setUser(mockUser);
         }
 
-        await loadDiligencesData();
+        // Charger les données initiales
+        const loadInitialData = async () => {
+          try {
+            const diligences = await apiClient.getDiligences();
+            console.log('📋 Données des diligences reçues:', diligences);
+            if (diligences && diligences.length > 0) {
+              console.log('📋 Première diligence:', diligences[0]);
+              console.log('📋 Destinataire details:', diligences[0]?.destinataire_details);
+              console.log('📋 Created by:', diligences[0]?.created_by);
+              console.log('📋 Date fin:', diligences[0]?.dateFin);
+            }
+            setDiligencesData(diligences || []);
+            
+            const calculateRealStatistics = (diligences: DiligenceData[]): Statistics => {
+              const enCours = diligences.filter(d => d.statut === 'En cours').length;
+              const terminees = diligences.filter(d => d.statut === 'Terminé').length;
+              const planifiees = diligences.filter(d => d.statut === 'Planifié').length;
+              const enRetard = diligences.filter(d => d.statut === 'En retard').length;
+              
+              const tauxCompletion = terminees > 0 ? Math.round((terminees / diligences.length) * 100) : 0;
+          
+              // Calculer l'évolution par rapport aux statistiques précédentes
+              let evolutionEnCours = 0;
+              let evolutionTerminees = 0;
+          
+              if (previousStats) {
+                evolutionEnCours = previousStats.diligencesEnCours > 0 ?
+                  Math.round(((enCours - previousStats.diligencesEnCours) / previousStats.diligencesEnCours) * 100) : 0;
+                
+                evolutionTerminees = previousStats.diligencesTerminees > 0 ?
+                  Math.round(((terminees - previousStats.diligencesTerminees) / previousStats.diligencesTerminees) * 100) : 0;
+              }
+          
+              const isAdmin = user?.role === 'admin' || user?.role === 'Administrateur';
+              
+              // Calculer les documents et rapports basés sur les données réelles
+              let mesDocuments = 0;
+              let mesRapports = 0;
+          
+              if (!isAdmin && user) {
+                // Pour les utilisateurs normaux : documents des diligences assignées
+                const userDiligences = diligences.filter(diligence =>
+                  diligence.assigned_to === user.id ||
+                  (Array.isArray(diligence.destinataire) && diligence.destinataire.includes(user.id.toString()))
+                );
+                
+                // Compter les documents des diligences assignées
+                mesDocuments = userDiligences.reduce((total, diligence) => {
+                  return total + (Array.isArray(diligence.piecesJointes) ? diligence.piecesJointes.length : 0);
+                }, 0);
+          
+                // Les rapports sont les diligences terminées assignées à l'utilisateur
+                mesRapports = userDiligences.filter(d => d.statut === 'Terminé').length;
+              }
+          
+              if (isAdmin) {
+                return {
+                  diligencesEnCours: enCours,
+                  diligencesTerminees: terminees,
+                  diligencesPlanifiees: planifiees,
+                  diligencesEnRetard: enRetard,
+                  tauxCompletion: tauxCompletion,
+                  evolutionEnCours,
+                  evolutionTerminees,
+                  utilisateursActifs: 247,
+                  documentsTraites: 1248,
+                  rapportsGeneres: 89
+                };
+              } else {
+                return {
+                  diligencesEnCours: enCours,
+                  diligencesTerminees: terminees,
+                  diligencesPlanifiees: planifiees,
+                  diligencesEnRetard: enRetard,
+                  tauxCompletion: tauxCompletion,
+                  evolutionEnCours,
+                  evolutionTerminees,
+                  mesDocuments,
+                  mesRapports
+                };
+              }
+            };
+            
+            const calculatedStats = calculateRealStatistics(diligences || []);
+            setStats(calculatedStats);
+            setPreviousStats(calculatedStats);
+
+            const users = await apiClient.getUsers();
+            console.log('👥 Utilisateurs chargés:', users);
+            setUsersData(users || []);
+          } catch (error) {
+            console.error("Erreur lors du chargement des données:", error);
+            setStats(getDefaultStatistics(user?.role === 'admin' || user?.role === 'Administrateur'));
+          }
+        };
+        
+        loadInitialData();
         
       } catch (error) {
         console.error("Erreur:", error);
@@ -96,56 +216,195 @@ export default function DashboardPage() {
       }
     };
 
-    const loadDiligencesData = async () => {
-      try {
-        const diligences = await apiClient.getDiligences();
-        setDiligencesData(diligences || []);
-        
-        const calculatedStats = calculateRealStatistics(diligences || []);
-        setStats(calculatedStats);
-      } catch (error) {
-        console.error("Erreur lors du chargement des diligences:", error);
-        setStats(getDefaultStatistics(user?.role === 'admin' || user?.role === 'Administrateur'));
-      }
-    };
 
-    const calculateRealStatistics = (diligences: DiligenceData[]): Statistics => {
-      const enCours = diligences.filter(d => d.statut === 'En cours').length;
-      const terminees = diligences.filter(d => d.statut === 'Terminé').length;
-      const planifiees = diligences.filter(d => d.statut === 'Planifié').length;
-      const enRetard = diligences.filter(d => d.statut === 'En retard').length;
-      
-      const tauxCompletion = terminees > 0 ? Math.round((terminees / diligences.length) * 100) : 0;
 
-      const isAdmin = user?.role === 'admin' || user?.role === 'Administrateur';
-      
-      if (isAdmin) {
-        return {
-          diligencesEnCours: enCours,
-          diligencesTerminees: terminees,
-          diligencesPlanifiees: planifiees,
-          diligencesEnRetard: enRetard,
-          tauxCompletion: tauxCompletion,
-          utilisateursActifs: 247,
-          documentsTraites: 1248,
-          rapportsGeneres: 89
-        };
-      } else {
-        return {
-          diligencesEnCours: enCours,
-          diligencesTerminees: terminees,
-          diligencesPlanifiees: planifiees,
-          diligencesEnRetard: enRetard,
-          tauxCompletion: tauxCompletion,
-          mesDocuments: 45,
-          mesRapports: 8
-        };
-      }
-    };
 
 
     checkUser();
   }, [router]);
+
+  const loadDiligencesData = async () => {
+    try {
+      const diligences = await apiClient.getDiligences();
+      setDiligencesData(diligences || []);
+      
+      const calculateRealStatistics = (diligences: DiligenceData[]): Statistics => {
+        const enCours = diligences.filter(d => d.statut === 'En cours').length;
+        const terminees = diligences.filter(d => d.statut === 'Terminé').length;
+        const planifiees = diligences.filter(d => d.statut === 'Planifié').length;
+        const enRetard = diligences.filter(d => d.statut === 'En retard').length;
+        
+        const tauxCompletion = terminees > 0 ? Math.round((terminees / diligences.length) * 100) : 0;
+    
+        // Calculer l'évolution par rapport aux statistiques précédentes
+        let evolutionEnCours = 0;
+        let evolutionTerminees = 0;
+    
+        if (previousStats) {
+          evolutionEnCours = previousStats.diligencesEnCours > 0 ?
+            Math.round(((enCours - previousStats.diligencesEnCours) / previousStats.diligencesEnCours) * 100) : 0;
+          
+          evolutionTerminees = previousStats.diligencesTerminees > 0 ?
+            Math.round(((terminees - previousStats.diligencesTerminees) / previousStats.diligencesTerminees) * 100) : 0;
+        }
+    
+        const isAdmin = user?.role === 'admin' || user?.role === 'Administrateur';
+        
+        // Calculer les documents et rapports basés sur les données réelles
+        let mesDocuments = 0;
+        let mesRapports = 0;
+    
+        if (!isAdmin && user) {
+          // Pour les utilisateurs normaux : documents des diligences assignées
+          const userDiligences = diligences.filter(diligence =>
+            diligence.assigned_to === user.id ||
+            (Array.isArray(diligence.destinataire) && diligence.destinataire.includes(user.id.toString()))
+          );
+          
+          // Compter les documents des diligences assignées
+          mesDocuments = userDiligences.reduce((total, diligence) => {
+            return total + (Array.isArray(diligence.piecesJointes) ? diligence.piecesJointes.length : 0);
+          }, 0);
+    
+          // Les rapports sont les diligences terminées assignées à l'utilisateur
+          mesRapports = userDiligences.filter(d => d.statut === 'Terminé').length;
+        }
+    
+        if (isAdmin) {
+          return {
+            diligencesEnCours: enCours,
+            diligencesTerminees: terminees,
+            diligencesPlanifiees: planifiees,
+            diligencesEnRetard: enRetard,
+            tauxCompletion: tauxCompletion,
+            evolutionEnCours,
+            evolutionTerminees,
+            utilisateursActifs: 247,
+            documentsTraites: 1248,
+            rapportsGeneres: 89
+          };
+        } else {
+          return {
+            diligencesEnCours: enCours,
+            diligencesTerminees: terminees,
+            diligencesPlanifiees: planifiees,
+            diligencesEnRetard: enRetard,
+            tauxCompletion: tauxCompletion,
+            evolutionEnCours,
+            evolutionTerminees,
+            mesDocuments,
+            mesRapports
+          };
+        }
+      };
+      
+      const calculatedStats = calculateRealStatistics(diligences || []);
+      setStats(calculatedStats);
+      // Stocker les statistiques actuelles comme précédentes pour le prochain calcul
+      setPreviousStats(calculatedStats);
+    } catch (error) {
+      console.error("Erreur lors du chargement des diligences:", error);
+      setStats(getDefaultStatistics(user?.role === 'admin' || user?.role === 'Administrateur'));
+    }
+  };
+
+  const loadUsersData = async () => {
+    try {
+      console.log("Chargement des utilisateurs...");
+      const users = await apiClient.getUsers();
+      console.log("Utilisateurs chargés:", users);
+      setUsersData(users || []);
+    } catch (error) {
+      console.error("Erreur lors du chargement des utilisateurs:", error);
+    }
+  };
+
+
+  // Rafraîchir les données automatiquement toutes les 60 secondes
+  useEffect(() => {
+    const refreshData = async () => {
+      try {
+        const diligences = await apiClient.getDiligences();
+        setDiligencesData(diligences || []);
+        
+        const users = await apiClient.getUsers();
+        setUsersData(users || []);
+        
+        // Recalculer les statistiques
+        const calculateRealStatistics = (diligences: DiligenceData[]): Statistics => {
+          const enCours = diligences.filter(d => d.statut === 'En cours').length;
+          const terminees = diligences.filter(d => d.statut === 'Terminé').length;
+          const planifiees = diligences.filter(d => d.statut === 'Planifié').length;
+          const enRetard = diligences.filter(d => d.statut === 'En retard').length;
+          
+          const tauxCompletion = terminees > 0 ? Math.round((terminees / diligences.length) * 100) : 0;
+      
+          const isAdmin = user?.role === 'admin' || user?.role === 'Administrateur';
+          
+          // Calculer les documents et rapports basés sur les données réelles
+          let mesDocuments = 0;
+          let mesRapports = 0;
+      
+          if (!isAdmin && user) {
+            // Pour les utilisateurs normaux : documents des diligences assignées
+            const userDiligences = diligences.filter(diligence =>
+              diligence.assigned_to === user.id ||
+              (Array.isArray(diligence.destinataire) && diligence.destinataire.includes(user.id.toString()))
+            );
+            
+            // Compter les documents des diligences assignées
+            mesDocuments = userDiligences.reduce((total, diligence) => {
+              return total + (Array.isArray(diligence.piecesJointes) ? diligence.piecesJointes.length : 0);
+            }, 0);
+      
+            // Les rapports sont les diligences terminées assignées à l'utilisateur
+            mesRapports = userDiligences.filter(d => d.statut === 'Terminé').length;
+          }
+      
+          if (isAdmin) {
+            return {
+              diligencesEnCours: enCours,
+              diligencesTerminees: terminees,
+              diligencesPlanifiees: planifiees,
+              diligencesEnRetard: enRetard,
+              tauxCompletion: tauxCompletion,
+              evolutionEnCours: 0,
+              evolutionTerminees: 0,
+              utilisateursActifs: 247,
+              documentsTraites: 1248,
+              rapportsGeneres: 89
+            };
+          } else {
+            return {
+              diligencesEnCours: enCours,
+              diligencesTerminees: terminees,
+              diligencesPlanifiees: planifiees,
+              diligencesEnRetard: enRetard,
+              tauxCompletion: tauxCompletion,
+              evolutionEnCours: 0,
+              evolutionTerminees: 0,
+              mesDocuments,
+              mesRapports
+            };
+          }
+        };
+        
+        const calculatedStats = calculateRealStatistics(diligences || []);
+        setStats(calculatedStats);
+        
+      } catch (error) {
+        console.error("Erreur lors du rafraîchissement des données:", error);
+      }
+    };
+
+    const pollingInterval = setInterval(() => {
+      refreshData();
+    }, 60000); // Rafraîchir toutes les 60 secondes
+
+    return () => {
+      clearInterval(pollingInterval);
+    };
+  }, [user]);
 
   const getDefaultStatistics = (isAdmin: boolean): Statistics => {
     return isAdmin ? {
@@ -154,6 +413,8 @@ export default function DashboardPage() {
       diligencesPlanifiees: 18,
       diligencesEnRetard: 3,
       tauxCompletion: 87,
+      evolutionEnCours: 12,
+      evolutionTerminees: 8,
       utilisateursActifs: 247,
       documentsTraites: 1248,
       rapportsGeneres: 89
@@ -163,8 +424,10 @@ export default function DashboardPage() {
       diligencesPlanifiees: 2,
       diligencesEnRetard: 0,
       tauxCompletion: 92,
-      mesDocuments: 45,
-      mesRapports: 8
+      evolutionEnCours: 5,
+      evolutionTerminees: 3,
+      mesDocuments: 0, // Maintenant calculé dynamiquement
+      mesRapports: 0   // Maintenant calculé dynamiquement
     };
   };
 
@@ -202,15 +465,62 @@ export default function DashboardPage() {
     { id: 5, action: "Formation complétée", details: "Module sécurité des données", temps: "Il y a 3 jours", type: "training" }
   ];
 
-  const prochainesEcheances = isAdmin ? [
-    { id: 1, nom: "Maintenance système", client: "Système", echeance: "Demain, 02:00", priorite: "Haute", progression: 0, type: "admin" },
-    { id: 2, nom: "Sauvegarde BDD", client: "Sauvegarde", echeance: "15/02/2025", priorite: "Haute", progression: 0, type: "admin" },
-    { id: 3, nom: "Rapport administratif", client: "Rapports", echeance: "25/02/2025", priorite: "Moyenne", progression: 10, type: "admin" },
-    { id: 4, nom: "Audit sécurité", client: "Ministère Défense", echeance: "22/02/2025", priorite: "Haute", progression: 75, type: "diligence" }
-  ] : [
-    { id: 1, nom: "Rapport hebdomadaire", client: "Projet Alpha", echeance: "Demain, 17:00", priorite: "Moyenne", progression: 85, type: "diligence" },
-    { id: 2, nom: "Vérification documents", client: "Client XYZ", echeance: "15/02/2025", priorite: "Haute", progression: 60, type: "diligence" }
-  ];
+  // Calculer les prochaines échéances basées sur les diligences réelles
+  const getProchainesEcheances = () => {
+    if (!diligencesData || diligencesData.length === 0) {
+      return isAdmin ? [
+        { id: 1, nom: "Maintenance système", client: "Système", echeance: "Demain, 02:00", priorite: "Haute", progression: 0, type: "admin" },
+        { id: 2, nom: "Sauvegarde BDD", client: "Sauvegarde", echeance: "15/02/2025", priorite: "Haute", progression: 0, type: "admin" }
+      ] : [
+        { id: 1, nom: "Rapport hebdomadaire", client: "Projet Alpha", echeance: "Demain, 17:00", priorite: "Moyenne", progression: 85, type: "diligence" },
+        { id: 2, nom: "Vérification documents", client: "Client XYZ", echeance: "15/02/2025", priorite: "Haute", progression: 60, type: "diligence" }
+      ];
+    }
+
+    // Filtrer les diligences selon le rôle de l'utilisateur
+    let userDiligences = diligencesData;
+    
+    if (!isAdmin && user) {
+      // Pour les utilisateurs normaux : diligences assignées ET diligences qu'ils ont assignées à d'autres
+      userDiligences = diligencesData.filter(diligence =>
+        diligence.assigned_to === user.id ||
+        (Array.isArray(diligence.destinataire) && diligence.destinataire.includes(user.id.toString())) ||
+        diligence.created_by === user.id
+      );
+    }
+
+    // Convertir les diligences en format d'échéance
+    const echeances = userDiligences
+      .filter(d => d.statut !== 'Terminé' && d.statut !== 'En retard') // Exclure terminées et en retard
+      .map(diligence => ({
+        id: diligence.id,
+        nom: diligence.titre || 'Diligence sans titre',
+        client: diligence.client || 'Client non spécifié',
+        echeance: diligence.dateFin ? new Date(diligence.dateFin).toLocaleDateString('fr-FR') : 'Date non définie',
+        priorite: diligence.priorite || 'Moyenne',
+        progression: diligence.progression || 0,
+        type: 'diligence'
+      }))
+      .sort((a, b) => {
+        // Trier par date d'échéance (les plus proches d'abord)
+        const dateA = new Date(a.echeance);
+        const dateB = new Date(b.echeance);
+        return dateA.getTime() - dateB.getTime();
+      })
+      .slice(0, 5); // Limiter à 5 échéances
+
+    // Ajouter des tâches administratives pour les admins si peu d'échéances
+    if (isAdmin && echeances.length < 3) {
+      echeances.push(
+        { id: 1001, nom: "Maintenance système", client: "Système", echeance: "Demain, 02:00", priorite: "Haute", progression: 0, type: "admin" },
+        { id: 1002, nom: "Sauvegarde BDD", client: "Sauvegarde", echeance: "15/02/2025", priorite: "Haute", progression: 0, type: "admin" }
+      );
+    }
+
+    return echeances;
+  };
+
+  const prochainesEcheances = getProchainesEcheances();
 
   const performanceEquipe = isAdmin ? [
     { nom: "Jean Kouassi", role: "Senior Analyst", diligences: 12, taux: 95, avatar: "JK" },
@@ -260,8 +570,43 @@ export default function DashboardPage() {
 
   const showDiligenceDetails = (diligence: Echeance) => {
     setSelectedDiligence(diligence);
+    
+    // Trouver la diligence correspondante pour récupérer les informations détaillées
+    const diligenceDetail = diligencesData.find(d => d.id === diligence.id);
+    const destinataireData = diligenceDetail?.destinataire;
+    
+    // Gérer le cas où destinataire est une chaîne JSON
+    let destinatairesIds: (string | number)[] = [];
+    if (typeof destinataireData === 'string') {
+      try {
+        destinatairesIds = JSON.parse(destinataireData);
+      } catch (error) {
+        console.error('Erreur parsing JSON destinataire:', error);
+        // Si le parsing échoue, traiter comme une chaîne simple
+        destinatairesIds = [destinataireData];
+      }
+    } else if (Array.isArray(destinataireData)) {
+      destinatairesIds = destinataireData;
+    } else if (destinataireData) {
+      destinatairesIds = [destinataireData];
+    }
+    
+    // Convertir les IDs en noms d'utilisateurs
+    const destinatairesNoms = destinatairesIds.map((id: string | number) => {
+      // Convertir l'ID en nombre pour la comparaison
+      const idNum = typeof id === 'string' ? parseInt(id, 10) : id;
+      const user = usersData.find(u => u.id === idNum);
+      return user?.name || `Utilisateur ${id}`;
+    });
+    
     const typeInfo = diligence.type === 'admin' ? ' (Tâche administrative)' : ' (Diligence)';
-    const message = `${diligence.nom}${typeInfo}\nClient: ${diligence.client}\nÉchéance: ${diligence.echeance}\nPriorité: ${diligence.priorite}\nProgression: ${diligence.progression}%`;
+    let message = `${diligence.nom}${typeInfo}\nÉchéance: ${diligence.echeance}\nPriorité: ${diligence.priorite}\nProgression: ${diligence.progression}%`;
+    
+    // Ajouter les destinataires si disponibles
+    if (destinatairesNoms.length > 0) {
+      message += `\nDestinataires: ${destinatairesNoms.join(', ')}`;
+    }
+    
     addNotification(message, 'info');
   };
 
@@ -284,7 +629,11 @@ export default function DashboardPage() {
               <div>
                 <h3 className="text-gray-500 text-sm font-medium">En cours</h3>
                 <p className="text-3xl font-bold mt-2 text-blue-600">{currentStats.diligencesEnCours}</p>
-                <p className="text-green-600 text-sm mt-1 font-medium">+12% ce mois</p>
+                <p className={`text-sm mt-1 font-medium ${
+                  evolutionStats.evolutionEnCours >= 0 ? 'text-green-600' : 'text-red-600'
+                }`}>
+                  {evolutionStats.evolutionEnCours >= 0 ? '+' : ''}{evolutionStats.evolutionEnCours}% évolution
+                </p>
               </div>
               <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center">
                 <span className="text-2xl">🔄</span>
@@ -297,7 +646,11 @@ export default function DashboardPage() {
               <div>
                 <h3 className="text-gray-500 text-sm font-medium">Terminées</h3>
                 <p className="text-3xl font-bold mt-2 text-green-600">{currentStats.diligencesTerminees}</p>
-                <p className="text-green-600 text-sm mt-1 font-medium">+8 cette semaine</p>
+                <p className={`text-sm mt-1 font-medium ${
+                  evolutionStats.evolutionTerminees >= 0 ? 'text-green-600' : 'text-red-600'
+                }`}>
+                  {evolutionStats.evolutionTerminees >= 0 ? '+' : ''}{evolutionStats.evolutionTerminees} évolution
+                </p>
               </div>
               <div className="w-12 h-12 bg-green-50 rounded-lg flex items-center justify-center">
                 <span className="text-2xl">✅</span>
@@ -389,44 +742,98 @@ export default function DashboardPage() {
               <thead>
                <tr className="border-b border-gray-200">
                  <th className="text-left p-3 font-semibold text-gray-700">{isAdmin ? "Tâche" : "Diligence"}</th>
-                 {isAdmin ? null : <th className="text-left p-3 font-semibold text-gray-700">Client</th>}
+                 <th className="text-left p-3 font-semibold text-gray-700">Destinataire</th>
                  <th className="text-left p-3 font-semibold text-gray-700">Échéance</th>
                  <th className="text-left p-3 font-semibold text-gray-700">Priorité</th>
                  <th className="text-left p-3 font-semibold text-gray-700">Progression</th>
                </tr>
              </thead>
               <tbody>
-                {prochainesEcheances.map((echeance) => (
-                  <tr key={echeance.id} className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${getEcheanceStyle(echeance)}`}>
-                    <td className="p-3 font-medium text-gray-800">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-sm">{getEcheanceIcon(echeance)}</span>
-                        <div>
-                          <div>{echeance.nom}</div>
-                          {isAdmin && <div className="text-sm text-gray-500">{echeance.client}</div>}
+                {prochainesEcheances.map((echeance) => {
+                  // Trouver la diligence correspondante pour récupérer les informations détaillées
+                  const diligence = diligencesData.find(d => d.id === echeance.id);
+                  
+                  // Récupérer les informations des destinataires avec fallback
+                  let destinatairesNoms: string[] = [];
+                  
+                  console.log('📋 Diligence en cours de traitement:', diligence);
+                  console.log('📋 User ID:', user?.id);
+                  console.log('📋 Created by:', diligence?.created_by);
+                  
+                  if (diligence?.destinataire_details && diligence.destinataire_details.length > 0) {
+                    // Utiliser les détails des destinataires fournis par le backend
+                    destinatairesNoms = diligence.destinataire_details.map((dest: DestinataireDetail) =>
+                      dest.name || `Utilisateur ${dest.id}`
+                    );
+                    console.log('📋 Destinataires from details:', destinatairesNoms);
+                  } else if (diligence?.destinataire && diligence.destinataire.length > 0) {
+                    // Fallback: convertir les IDs en noms manuellement
+                    const destinataireIds = Array.isArray(diligence.destinataire) ?
+                      diligence.destinataire :
+                      [diligence.destinataire];
+                    
+                    destinatairesNoms = destinataireIds.map((id: string | number) => {
+                      const idNum = typeof id === 'string' ? parseInt(id, 10) : id;
+                      const user = usersData.find(u => u.id === idNum);
+                      return user?.name || `Utilisateur ${id}`;
+                    });
+                    console.log('📋 Destinataires from fallback:', destinatairesNoms);
+                  }
+                  
+                  // Déterminer l'affichage du destinataire selon le contexte
+                  let destinataireAffichage = 'Aucun destinataire';
+                  if (user && diligence) {
+                    console.log('📋 Comparaison created_by vs user.id:', diligence.created_by, '===', user.id);
+                    if (diligence.created_by === user.id) {
+                      // Côté émetteur : afficher le nom du destinataire
+                      destinataireAffichage = destinatairesNoms.length > 0 ? destinatairesNoms.join(', ') : 'Aucun destinataire';
+                      console.log('📋 Affichage émetteur:', destinataireAffichage);
+                    } else {
+                      // Côté destinataire : afficher le nom de l'émetteur
+                      const createur = usersData.find(u => u.id === diligence.created_by);
+                      destinataireAffichage = createur?.name || `Utilisateur ${diligence.created_by}`;
+                      console.log('📋 Affichage destinataire:', destinataireAffichage);
+                    }
+                  }
+                  
+                  const dateEcheance = diligence?.dateFin ? new Date(diligence.dateFin).toLocaleDateString('fr-FR') : 'Non définie';
+                  console.log('📋 Date échéance:', dateEcheance);
+                  
+                  return (
+                    <tr key={echeance.id} className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${getEcheanceStyle(echeance)}`}>
+                      <td className="p-3 font-medium text-gray-800">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-sm">{getEcheanceIcon(echeance)}</span>
+                          <div>
+                            <div>{echeance.nom}</div>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    {!isAdmin && <td className="p-3 text-gray-600">{echeance.client}</td>}
-                    <td className="p-3 text-gray-600">{echeance.echeance}</td>
-                    <td className="p-3">
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPrioriteColor(echeance.priorite)}`}>
-                        {echeance.priorite}
-                      </span>
-                    </td>
-                    <td className="p-3">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-16 bg-gray-200 rounded-full h-2">
-                          <div
-                            className="bg-orange-500 h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${echeance.progression}%` }}
-                          ></div>
+                      </td>
+                      <td className="p-3 text-gray-600">
+                        <div className="text-sm">
+                          {destinataireAffichage}
                         </div>
-                        <span className="text-sm font-medium text-gray-600">{echeance.progression}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="p-3 text-gray-600">{dateEcheance}</td>
+                      <td className="p-3">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPrioriteColor(echeance.priorite)}`}>
+                          {echeance.priorite}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-16 bg-gray-200 rounded-full h-2">
+                            <div
+                              className="bg-orange-500 h-2 rounded-full transition-all duration-300"
+                              style={{ width: `${echeance.progression}%` }}
+                            ></div>
+                          </div>
+                          <span className="text-sm font-medium text-gray-600">{echeance.progression}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

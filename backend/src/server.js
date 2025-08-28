@@ -454,6 +454,7 @@ app.get('/api/diligences', async (req, res) => {
       
       return {
         ...diligence,
+        created_by: diligence.created_by, // S'assurer que created_by est inclus
         destinataire_details: destinataireDetails
       };
     });
@@ -513,6 +514,7 @@ app.get('/api/diligences/:id', async (req, res) => {
     
     const diligenceWithDetails = {
       ...diligence,
+      created_by: diligence.created_by, // S'assurer que created_by est inclus
       destinataire_details: destinataireDetails
     };
 
@@ -525,7 +527,9 @@ app.get('/api/diligences/:id', async (req, res) => {
 
 // Route pour créer une nouvelle diligence
 app.post('/api/diligences', async (req, res) => {
-  const { titre, directiondestinataire, datedebut, datefin, description, priorite, statut, destinataire, piecesjointes, progression } = req.body;
+  const { titre, directiondestinataire, datedebut, datefin, description, priorite, statut, destinataire, piecesjointes, progression, created_by } = req.body;
+  
+  console.log("Données reçues pour création de diligence:", req.body);
   
   if (!titre || !directiondestinataire || !datedebut || !datefin || !description) {
     return res.status(400).json({
@@ -536,10 +540,12 @@ app.post('/api/diligences', async (req, res) => {
   try {
     const database = await getDatabase();
     
+    console.log("Insertion avec created_by:", created_by);
+    
     const result = await database.run(
-      `INSERT INTO diligences (titre, directiondestinataire, datedebut, datefin, description, priorite, statut, destinataire, piecesjointes, progression, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      [titre, directiondestinataire, datedebut, datefin, description, priorite || 'Moyenne', statut || 'Planifié', destinataire, JSON.stringify(piecesjointes || []), progression || 0]
+      `INSERT INTO diligences (titre, directiondestinataire, datedebut, datefin, description, priorite, statut, destinataire, piecesjointes, progression, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+      [titre, directiondestinataire, datedebut, datefin, description, priorite || 'Moyenne', statut || 'Planifié', destinataire, JSON.stringify(piecesjointes || []), progression || 0, created_by]
     );
 
     res.status(201).json({

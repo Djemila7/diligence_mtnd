@@ -65,33 +65,10 @@ class ApiClient {
       console.log('🔍 API Request URL:', url);
       console.log('🔍 API Request Config:', JSON.stringify(config, null, 2));
       
-      // Ajouter un timeout pour éviter les blocages
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 secondes timeout
-      
       console.log('🔍 Starting fetch request...');
       
-      // Test avec une requête fetch simple pour isoler le problème
-      try {
-        // Test de connectivité de base via proxy
-        const testResponse = await fetch('/api/health', {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          }
-        });
-        console.log('✅ Health check response:', await testResponse.text());
-      } catch (testError) {
-        console.error('❌ Health check failed:', testError);
-        throw new Error('Impossible de se connecter au serveur backend: ' + testError.message);
-      }
-      
-      const response = await fetch(url, {
-        ...config,
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
+      // Configuration simplifiée sans timeout pour éviter les AbortError
+      const response = await fetch(url, config);
       
       console.log('✅ API Response status:', response.status, response.statusText);
       console.log('✅ API Response headers:', Object.fromEntries(response.headers.entries()));

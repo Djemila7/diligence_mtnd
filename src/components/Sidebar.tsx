@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api/client";
+import { useDiligenceNotifications } from "@/hooks/useDiligenceNotifications";
+import { DiligenceNotificationsModal } from "./DiligenceNotificationsModal";
 
 type User = {
   id: number;
@@ -47,8 +50,10 @@ const NotificationIcon = () => (
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
-  const [notificationCount, setNotificationCount] = useState(3); // Simuler des notifications
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const { notificationCount, resetNotificationCount } = useDiligenceNotifications();
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -94,7 +99,13 @@ export default function Sidebar() {
                 ({user?.role || (user ? (user.email?.includes('admin') ? 'Administrateur' : 'Connecté') : 'Invité')})
               </p>
             </div>
-            <button className="relative p-1.5 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-white/50 transition-all duration-200 group">
+            <button
+              className="relative p-1.5 rounded-lg text-gray-500 hover:text-gray-700 hover:bg-white/50 transition-all duration-200 group"
+              onClick={() => {
+                setShowNotificationsModal(true);
+                resetNotificationCount();
+              }}
+            >
               <NotificationIcon />
               {/* Badge de notification */}
               {notificationCount > 0 && (
@@ -105,7 +116,9 @@ export default function Sidebar() {
               {/* Tooltip */}
               <div className="absolute left-full ml-2 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50">
                 <div className="bg-gray-800 text-white text-xs rounded-lg px-2 py-1 whitespace-nowrap">
-                  {notificationCount > 0 ? `${notificationCount} notification${notificationCount > 1 ? 's' : ''}` : 'Aucune notification'}
+                  {notificationCount > 0 ?
+                    `${notificationCount} nouvelle${notificationCount > 1 ? 's' : ''} diligence${notificationCount > 1 ? 's' : ''}` :
+                    'Aucune nouvelle diligence'}
                   <div className="absolute right-full top-1/2 transform -translate-y-1/2 border-4 border-transparent border-r-gray-800"></div>
                 </div>
               </div>
@@ -192,6 +205,16 @@ export default function Sidebar() {
           </span>
         </Link>
       </div>
+
+      {/* Modal des notifications de diligences */}
+      <DiligenceNotificationsModal
+        isOpen={showNotificationsModal}
+        onClose={() => setShowNotificationsModal(false)}
+        onDiligenceClick={(diligenceId) => {
+          setShowNotificationsModal(false);
+          router.push(`/diligence/${diligenceId}`);
+        }}
+      />
     </div>
   );
 }

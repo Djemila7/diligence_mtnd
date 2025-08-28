@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     name TEXT NOT NULL,
     role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user')),
+    direction TEXT DEFAULT '',
     is_active BOOLEAN DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -100,6 +101,9 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 -- Ajouter la colonne phone à la table users si elle n'existe pas
 ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
+
+-- Ajouter la colonne direction à la table users si elle n'existe pas
+ALTER TABLE users ADD COLUMN IF NOT EXISTS direction TEXT DEFAULT '';
 
 -- Création des index pour améliorer les performances
 CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id);

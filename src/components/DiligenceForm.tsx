@@ -8,6 +8,7 @@ interface User {
   email: string;
   name: string;
   role?: string;
+  direction?: string;
 }
 
 interface DiligenceData {
@@ -53,7 +54,8 @@ export default function DiligenceForm({ onClose, onSubmit, initialData }: Dilige
           id: user.id.toString(),
           email: user.email || 'Email non défini',
           name: user.name || user.email || `Utilisateur ${user.id}`,
-          role: user.role || 'user'
+          role: user.role || 'user',
+          direction: user.direction || ''
         }));
 
         setUsers(formattedUsers);
@@ -91,6 +93,21 @@ export default function DiligenceForm({ onClose, onSubmit, initialData }: Dilige
       });
     }
   }, [initialData]);
+
+  // Mettre à jour automatiquement la direction quand un destinataire est sélectionné
+  useEffect(() => {
+    if (formData.destinataire.length > 0) {
+      const selectedUserId = formData.destinataire[0]; // Prendre le premier destinataire
+      const selectedUser = users.find(user => user.id === selectedUserId);
+      
+      if (selectedUser && selectedUser.direction) {
+        setFormData(prev => ({
+          ...prev,
+          directionDestinataire: selectedUser.direction || ''
+        }));
+      }
+    }
+  }, [formData.destinataire, users]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

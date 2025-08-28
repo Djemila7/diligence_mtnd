@@ -15,12 +15,14 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, '../../.env.local') });
 
 const app = express();
-const PORT = process.env.BACKEND_PORT || 3001;
+const PORT = process.env.BACKEND_PORT || 3003;
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  origin: process.env.FRONTEND_URL || ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3006'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -49,7 +51,7 @@ app.get('/api/health', (req, res) => {
 app.get('/api/users', async (req, res) => {
   try {
     const database = await getDatabase();
-    const users = await database.all('SELECT id, email, name, role, created_at FROM users WHERE is_active = 1');
+    const users = await database.all('SELECT id, email, name, role, direction, created_at FROM users WHERE is_active = 1');
     res.json(users);
   } catch (error) {
     console.error('Erreur lors de la récupération des utilisateurs:', error);
@@ -59,11 +61,18 @@ app.get('/api/users', async (req, res) => {
 
 // Route pour créer un nouvel utilisateur
 app.post('/api/users', async (req, res) => {
-  const { email, password, name, role } = req.body;
+  const { email, password, name, role, direction } = req.body;
   
   if (!email || !name) {
     return res.status(400).json({
       error: 'Email et nom complet sont requis'
+    });
+  }
+
+  // Validation : l'email doit se terminer par @gmail.com
+  if (!email.endsWith('@gmail.com')) {
+    return res.status(400).json({
+      error: 'L\'adresse email doit se terminer par @gmail.com'
     });
   }
 
@@ -95,9 +104,9 @@ app.post('/api/users', async (req, res) => {
 
     // Créer l'utilisateur
     const result = await database.run(
-      `INSERT INTO users (email, password_hash, name, role, is_active, created_at)
-       VALUES (?, ?, ?, ?, 1, datetime('now'))`,
-      [email, passwordHash, name, role || 'user']
+      `INSERT INTO users (email, password_hash, name, role, direction, is_active, created_at)
+       VALUES (?, ?, ?, ?, ?, 1, datetime('now'))`,
+      [email, passwordHash, name, role || 'user', direction || '']
     );
 
     res.status(201).json({
@@ -114,11 +123,18 @@ app.post('/api/users', async (req, res) => {
 // Route pour modifier un utilisateur
 app.put('/api/users/:id', async (req, res) => {
   const { id } = req.params;
-  const { email, name, role, password } = req.body;
+  const { email, name, role, password, direction } = req.body;
   
   if (!email || !name) {
     return res.status(400).json({
       error: 'Email et nom complet sont requis'
+    });
+  }
+
+  // Validation : l'email doit se terminer par @gmail.com
+  if (!email.endsWith('@gmail.com')) {
+    return res.status(400).json({
+      error: 'L\'adresse email doit se terminer par @gmail.com'
     });
   }
 
@@ -151,8 +167,8 @@ app.put('/api/users/:id', async (req, res) => {
       }
     }
 
-    let updateQuery = 'UPDATE users SET email = ?, name = ?, role = ?';
-    let queryParams = [email, name, role || 'user'];
+    let updateQuery = 'UPDATE users SET email = ?, name = ?, role = ?, direction = ?';
+    let queryParams = [email, name, role || 'user', direction || ''];
 
     // Mettre à jour le mot de passe seulement si fourni
     if (password) {
@@ -399,15 +415,110 @@ app.get('/api/diligences', async (req, res) => {
   try {
     const database = await getDatabase();
     const diligences = await database.all(`
-      SELECT d.*, u.name as assigned_name, creator.name as created_by_name
+      SELECT d.*, u.name as assigned_name, u.direction as assigned_direction, creator.name as created_by_name, creator.direction as created_by_direction
       FROM diligences d
       LEFT JOIN users u ON d.assigned_to = u.id
       LEFT JOIN users creator ON d.created_by = creator.id
       ORDER BY d.created_at DESC
     `);
-    res.json(diligences);
+
+    // Convertir les IDs des destinataires en noms d'utilisateurs
+    const usersList = await database.all('SELECT id, name, email FROM users WHERE is_active = 1');
+    
+    const diligencesWithDestinataireNames = diligences.map(diligence => {
+      let destinataireDetails = [];
+      
+      if (diligence.destinataire) {
+        try {
+          let destinataireIds = [];
+          
+          if (typeof diligence.destinataire === 'string') {
+            try {
+              const parsed = JSON.parse(diligence.destinataire);
+              destinataireIds = Array.isArray(parsed) ? parsed : [parsed];
+            } catch {
+              destinataireIds = [diligence.destinataire];
+            }
+          } else if (Array.isArray(diligence.destinataire)) {
+            destinataireIds = diligence.destinataire;
+          }
+          
+          destinataireDetails = destinataireIds.map(id => {
+            const user = usersList.find(u => u.id == id);
+            return user ? { id: user.id, name: user.name, email: user.email } : { id, name: `Utilisateur ${id}` };
+          });
+        } catch (error) {
+          console.error('Erreur lors de la conversion des destinataires:', error);
+        }
+      }
+      
+      return {
+        ...diligence,
+        destinataire_details: destinataireDetails
+      };
+    });
+
+    res.json(diligencesWithDestinataireNames);
   } catch (error) {
     console.error('Erreur lors de la récupération des diligences:', error);
+    res.status(500).json({ error: 'Erreur interne du serveur' });
+  }
+});
+
+// Route pour obtenir une diligence spécifique
+app.get('/api/diligences/:id', async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    const database = await getDatabase();
+    const diligence = await database.get(`
+      SELECT d.*, u.name as assigned_name, u.direction as assigned_direction, creator.name as created_by_name, creator.direction as created_by_direction
+      FROM diligences d
+      LEFT JOIN users u ON d.assigned_to = u.id
+      LEFT JOIN users creator ON d.created_by = creator.id
+      WHERE d.id = ?
+    `, [id]);
+    
+    if (!diligence) {
+      return res.status(404).json({ error: 'Diligence non trouvée' });
+    }
+
+    // Convertir les IDs des destinataires en noms d'utilisateurs
+    const usersList = await database.all('SELECT id, name, email FROM users WHERE is_active = 1');
+    let destinataireDetails = [];
+    
+    if (diligence.destinataire) {
+      try {
+        let destinataireIds = [];
+        
+        if (typeof diligence.destinataire === 'string') {
+          try {
+            const parsed = JSON.parse(diligence.destinataire);
+            destinataireIds = Array.isArray(parsed) ? parsed : [parsed];
+          } catch {
+            destinataireIds = [diligence.destinataire];
+          }
+        } else if (Array.isArray(diligence.destinataire)) {
+          destinataireIds = diligence.destinataire;
+        }
+        
+        destinataireDetails = destinataireIds.map(id => {
+          const user = usersList.find(u => u.id == id);
+          return user ? { id: user.id, name: user.name, email: user.email } : { id, name: `Utilisateur ${id}` };
+        });
+      } catch (error) {
+        console.error('Erreur lors de la conversion des destinataires:', error);
+      }
+    }
+    
+    const diligenceWithDetails = {
+      ...diligence,
+      destinataire_details: destinataireDetails
+    };
+
+    res.json(diligenceWithDetails);
+  } catch (error) {
+    console.error('Erreur lors de la récupération de la diligence:', error);
     res.status(500).json({ error: 'Erreur interne du serveur' });
   }
 });

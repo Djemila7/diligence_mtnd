@@ -8,6 +8,7 @@ interface User {
   email?: string;
   name?: string;
   role?: string;
+  direction?: string;
   created_at?: string;
 }
 
@@ -91,6 +92,7 @@ export default function UtilisateursTab() {
     password: string;
     name: string;
     role: string;
+    direction: string;
   }) => {
     setLoading(true);
     setError("");
@@ -124,6 +126,7 @@ export default function UtilisateursTab() {
     password: string;
     name: string;
     role: string;
+    direction: string;
   }) => {
     setLoading(true);
     setError("");
@@ -176,6 +179,7 @@ export default function UtilisateursTab() {
                 <tr className="border-b border-gray-200">
                   <th className="text-left p-3 font-semibold text-gray-700">Nom</th>
                   <th className="text-left p-3 font-semibold text-gray-700">Email</th>
+                  <th className="text-left p-3 font-semibold text-gray-700">Direction</th>
                   <th className="text-left p-3 font-semibold text-gray-700">Rôle</th>
                   <th className="text-left p-3 font-semibold text-gray-700">Statut</th>
                   <th className="text-left p-3 font-semibold text-gray-700">Actions</th>
@@ -186,6 +190,7 @@ export default function UtilisateursTab() {
                   <tr key={user.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                     <td className="p-3 text-gray-900">{user.name || 'N/A'}</td>
                     <td className="p-3 text-gray-900">{user.email}</td>
+                    <td className="p-3 text-gray-900">{user.direction || 'Non spécifié'}</td>
                     <td className="p-3">
                       <span className={`px-2 py-1 rounded-full text-xs border ${
                         user.role === 'admin'

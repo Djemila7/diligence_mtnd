@@ -34,17 +34,21 @@ export default function LoginPage() {
     }
 
     try {
+      console.log("Tentative de connexion avec:", credentials);
       // Connexion avec le nouveau backend
       const response = await apiClient.login(credentials.email, credentials.password);
+      console.log("Réponse de l'API:", response);
 
       if (response.success) {
+        console.log("Connexion réussie, redirection...");
         // Redirection vers la page d'accueil
         router.push('/');
       } else {
+        console.log("Échec de connexion:", response.message);
         setError(response.message || "Erreur de connexion");
       }
     } catch (error) {
-      console.error("Erreur:", error);
+      console.error("Erreur de connexion:", error);
       setError(error instanceof Error ? error.message : "Une erreur est survenue");
     } finally {
       setIsLoading(false);

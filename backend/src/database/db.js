@@ -62,6 +62,19 @@ export async function initializeDatabase() {
       console.warn('Warning lors de la vérification de la colonne phone:', error.message);
     }
 
+    // Vérifier et ajouter la colonne direction si elle n'existe pas
+    try {
+      const columns = await db.all("PRAGMA table_info(users)");
+      const hasDirectionColumn = columns.some(col => col.name === 'direction');
+      
+      if (!hasDirectionColumn) {
+        await db.exec("ALTER TABLE users ADD COLUMN direction TEXT DEFAULT ''");
+        console.log('✅ Colonne direction ajoutée à la table users');
+      }
+    } catch (error) {
+      console.warn('Warning lors de la vérification de la colonne direction:', error.message);
+    }
+
     console.log('✅ Schéma de base de données initialisé avec succès');
     return db;
   } catch (error) {

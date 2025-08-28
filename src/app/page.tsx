@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import { apiClient } from "@/lib/api/client";
+import { useNotifications } from "@/contexts/NotificationContext";
 
 interface Echeance {
   id: number;
@@ -47,6 +48,7 @@ export default function DashboardPage() {
   const [selectedDiligence, setSelectedDiligence] = useState<Echeance | null>(null);
   const [stats, setStats] = useState<Statistics | null>(null);
   const [diligencesData, setDiligencesData] = useState<DiligenceData[]>([]);
+  const { addNotification } = useNotifications();
 
   useEffect(() => {
     const checkUser = async () => {
@@ -258,8 +260,9 @@ export default function DashboardPage() {
 
   const showDiligenceDetails = (diligence: Echeance) => {
     setSelectedDiligence(diligence);
-    const typeInfo = diligence.type === 'admin' ? '\nType: Tâche administrative' : '\nType: Diligence';
-    alert(`Détails de l'échéance:${typeInfo}\nNom: ${diligence.nom}\nClient: ${diligence.client}\nÉchéance: ${diligence.echeance}\nPriorité: ${diligence.priorite}\nProgression: ${diligence.progression}%`);
+    const typeInfo = diligence.type === 'admin' ? ' (Tâche administrative)' : ' (Diligence)';
+    const message = `${diligence.nom}${typeInfo}\nClient: ${diligence.client}\nÉchéance: ${diligence.echeance}\nPriorité: ${diligence.priorite}\nProgression: ${diligence.progression}%`;
+    addNotification(message, 'info');
   };
 
   return (

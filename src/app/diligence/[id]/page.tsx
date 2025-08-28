@@ -16,6 +16,7 @@ interface Diligence {
   priorite: "Haute" | "Moyenne" | "Basse";
   statut: "Planifié" | "En cours" | "Terminé" | "En retard";
   destinataire: string | string[] | null;
+  destinataire_details?: { id: string; name: string; email: string }[];
   piecesjointes: string[];
   progression: number;
   created_at: string;
@@ -24,10 +25,18 @@ interface Diligence {
   created_by_name?: string;
 }
 
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  role?: string;
+}
+
 export default function DiligenceDetailPage() {
   const params = useParams();
   const diligenceId = params.id as string;
   const [diligence, setDiligence] = useState<Diligence | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,8 +60,18 @@ export default function DiligenceDetailPage() {
       }
     };
 
+    const fetchUsers = async () => {
+      try {
+        const usersData = await apiClient.getUsers();
+        setUsers(usersData);
+      } catch (err) {
+        console.error("Erreur lors du chargement des utilisateurs:", err);
+      }
+    };
+
     if (diligenceId) {
       fetchDiligence();
+      fetchUsers();
     }
   }, [diligenceId]);
 
@@ -97,6 +116,45 @@ export default function DiligenceDetailPage() {
     } catch (error) {
       console.error('Erreur lors du parsing des pièces jointes:', error);
       return [];
+    }
+  };
+
+  // Convertir les IDs des destinataires en noms d'utilisateurs
+  const getDestinataireNames = (diligence: Diligence): string[] => {
+    if (!diligence.destinataire && !diligence.destinataire_details) return ["Non spécifié"];
+    
+    try {
+      // Utiliser d'abord destinataire_details si disponible (depuis l'API mise à jour)
+      if (diligence.destinataire_details && Array.isArray(diligence.destinataire_details) && diligence.destinataire_details.length > 0) {
+        return diligence.destinataire_details.map(dest => dest.name || `Utilisateur ${dest.id}`);
+      }
+      
+      // Sinon, traiter l'ancien format avec les IDs
+      let destinataireIds: string[] = [];
+      const destinataire = diligence.destinataire;
+      
+      if (typeof destinataire === 'string') {
+        try {
+          const parsed = JSON.parse(destinataire);
+          destinataireIds = Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
+        } catch {
+          destinataireIds = [destinataire];
+        }
+      } else if (Array.isArray(destinataire)) {
+        destinataireIds = destinataire.map(String);
+      } else {
+        return ["Non spécifié"];
+      }
+      
+      const result = destinataireIds.map(id => {
+        const user = users.find(u => String(u.id) === String(id));
+        return user ? user.name : `Utilisateur ${id}`;
+      });
+      
+      return result;
+    } catch (error) {
+      console.error('Erreur lors de la conversion des destinataires:', error);
+      return ["Erreur d'affichage"];
     }
   };
 
@@ -192,15 +250,11 @@ export default function DiligenceDetailPage() {
                 <div>
                   <label className="block text-sm font-medium text-gray-600 mb-1">Destinataires</label>
                   <div className="space-y-1">
-                    {Array.isArray(diligence.destinataire) ? (
-                      diligence.destinataire.map((dest, index) => (
-                        <p key={index} className="text-gray-800 text-sm">
-                          • {dest}
-                        </p>
-                      ))
-                    ) : (
-                      <p className="text-gray-800">{diligence.destinataire || "Non spécifié"}</p>
-                    )}
+                    {getDestinataireNames(diligence).map((name, index) => (
+                      <p key={index} className="text-gray-800 text-sm">
+                        • {name}
+                      </p>
+                    ))}
                   </div>
                 </div>
                 <div>

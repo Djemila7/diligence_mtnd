@@ -6,6 +6,7 @@ import Sidebar from "@/components/Sidebar";
 import DiligenceForm from "@/components/DiligenceForm";
 import DeleteModal from "@/components/DeleteModal";
 import { apiClient } from "@/lib/api/client";
+import { useNotifications } from "@/contexts/NotificationContext";
 
 // Styles personnalisés pour les animations
 const styles = `
@@ -53,11 +54,19 @@ interface Diligence {
   description: string;
   priorite: "Haute" | "Moyenne" | "Basse";
   statut: "Planifié" | "En cours" | "Terminé" | "En retard";
-  destinataire: string | null;
+  destinataire: string | string[] | null;
+  destinataire_details?: { id: string; name: string; email: string }[];
   piecesjointes: string[];
   progression: number;
   created_at: string;
   updated_at: string;
+}
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  role?: string;
 }
 
 interface DiligenceFormData {
@@ -68,7 +77,7 @@ interface DiligenceFormData {
   description: string;
   priorite: string;
   statut: string;
-  destinataire: string | null;
+  destinataire: string[];
   piecesJointes: string[];
   piecesJointesFiles: File[];
 }
@@ -100,8 +109,10 @@ export default function DiligencePage() {
     dateFin: ''
   });
   const [allDiligences, setAllDiligences] = useState<Diligence[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastLoadTime, setLastLoadTime] = useState<number>(0);
+  const { addNotification } = useNotifications();
 
   // Initialiser les états depuis localStorage et charger les données
   useEffect(() => {
@@ -123,6 +134,10 @@ export default function DiligencePage() {
 
     // Charger les données si pas de cache ou cache expiré
     loadDiligences();
+    // Charger les utilisateurs avec un léger délai pour éviter les conflits
+    setTimeout(() => {
+      loadUsers();
+    }, 100);
   }, []);
 
   // Détecter quand l'utilisateur revient à l'onglet
@@ -156,9 +171,29 @@ export default function DiligencePage() {
       }
     } catch (error) {
       console.error('Erreur lors du chargement des diligences:', error);
-      alert('Erreur lors du chargement des données');
+      addNotification('Erreur lors du chargement des données', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadUsers = async () => {
+    try {
+      const usersData = await apiClient.getUsers();
+      console.log('Utilisateurs chargés:', usersData);
+      // S'assurer que les IDs sont des strings pour la comparaison
+      const formattedUsers = usersData.map((user: User) => ({
+        ...user,
+        id: user.id.toString()
+      }));
+      setUsers(formattedUsers);
+    } catch (error) {
+      console.error('Erreur lors du chargement des utilisateurs:', error);
+      // Fallback en cas d'erreur
+      setUsers([
+        { id: '1', email: 'admin@example.com', name: 'Administrateur', role: 'admin' },
+        { id: '2', email: 'user@example.com', name: 'Utilisateur Test', role: 'user' }
+      ]);
     }
   };
 
@@ -187,11 +222,11 @@ export default function DiligencePage() {
         setAllDiligences(prev => prev.filter(d => d.id !== diligenceToDelete.id));
         setShowDeleteModal(false);
         setDiligenceToDelete(null);
-        alert('Diligence supprimée avec succès');
+        addNotification('Diligence supprimée avec succès', 'success');
       } catch (error) {
         console.error('Erreur lors de la suppression:', error);
         const errorMessage = error instanceof Error ? error.message : 'Erreur inconnue';
-        alert(`Erreur lors de la suppression: ${errorMessage}`);
+        addNotification(`Erreur lors de la suppression: ${errorMessage}`, 'error');
       }
     }
   };
@@ -207,7 +242,7 @@ export default function DiligencePage() {
         description: formData.description,
         priorite: formData.priorite as "Haute" | "Moyenne" | "Basse",
         statut: formData.statut as "Planifié" | "En cours" | "Terminé" | "En retard",
-        destinataire: formData.destinataire,
+        destinataire: formData.destinataire.length > 0 ? formData.destinataire : null,
         piecesjointes: [], // Initialiser comme tableau vide
         progression: 0
       };
@@ -225,12 +260,15 @@ export default function DiligencePage() {
 
       setShowForm(false);
       setEditingDiligence(null);
-      alert(editingDiligence ? 'Diligence modifiée avec succès' : 'Diligence créée avec succès');
+      addNotification(
+        editingDiligence ? 'Diligence modifiée avec succès' : 'Diligence créée avec succès',
+        'success'
+      );
 
     } catch (error) {
       console.error('Erreur lors de la soumission:', error);
       const errorMessage = error instanceof Error ? error.message : 'Erreur inconnue';
-      alert(`Erreur lors de l'enregistrement: ${errorMessage}`);
+      addNotification(`Erreur lors de l'enregistrement: ${errorMessage}`, 'error');
     }
   };
 
@@ -239,7 +277,10 @@ export default function DiligencePage() {
     const matchSearch = !filters.search ||
       diligence.titre.toLowerCase().includes(filters.search.toLowerCase()) ||
       diligence.directiondestinataire.toLowerCase().includes(filters.search.toLowerCase()) ||
-      (diligence.destinataire && diligence.destinataire.toLowerCase().includes(filters.search.toLowerCase()));
+      (diligence.destinataire &&
+        (Array.isArray(diligence.destinataire)
+          ? diligence.destinataire.some(dest => dest.toLowerCase().includes(filters.search.toLowerCase()))
+          : diligence.destinataire.toLowerCase().includes(filters.search.toLowerCase())));
 
     const matchStatut = !filters.statut || diligence.statut === filters.statut;
     const matchPriorite = !filters.priorite || diligence.priorite === filters.priorite;
@@ -298,6 +339,45 @@ export default function DiligencePage() {
   // Formater la date pour l'affichage
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('fr-FR');
+  };
+
+  // Convertir les IDs des destinataires en noms d'utilisateurs
+  const getDestinataireNames = (diligence: Diligence): string[] => {
+    if (!diligence.destinataire && !diligence.destinataire_details) return ["Non spécifié"];
+    
+    try {
+      // Utiliser d'abord destinataire_details si disponible (depuis l'API mise à jour)
+      if (diligence.destinataire_details && Array.isArray(diligence.destinataire_details) && diligence.destinataire_details.length > 0) {
+        return diligence.destinataire_details.map(dest => dest.name || `Utilisateur ${dest.id}`);
+      }
+      
+      // Sinon, traiter l'ancien format avec les IDs
+      let destinataireIds: string[] = [];
+      const destinataire = diligence.destinataire;
+      
+      if (typeof destinataire === 'string') {
+        try {
+          const parsed = JSON.parse(destinataire);
+          destinataireIds = Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
+        } catch {
+          destinataireIds = [destinataire];
+        }
+      } else if (Array.isArray(destinataire)) {
+        destinataireIds = destinataire.map(String);
+      } else {
+        return ["Non spécifié"];
+      }
+      
+      const result = destinataireIds.map(id => {
+        const user = users.find(u => String(u.id) === String(id));
+        return user ? user.name : `Utilisateur ${id}`;
+      });
+      
+      return result;
+    } catch (error) {
+      console.error('Erreur lors de la conversion des destinataires:', error);
+      return ["Erreur d'affichage"];
+    }
   };
 
   // Composant de pagination
@@ -646,7 +726,9 @@ export default function DiligencePage() {
                   <tr key={diligence.id} className="hover:bg-gradient-to-r hover:from-orange-50 hover:to-transparent transition-all duration-200 animate-slide-in-up" style={{ animationDelay: `${index * 0.1}s` }}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">{diligence.titre}</div>
-                      <div className="text-sm text-gray-500">{diligence.destinataire || 'Non spécifié'}</div>
+                      <div className="text-sm text-gray-500">
+                        {getDestinataireNames(diligence).join(', ')}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{diligence.directiondestinataire}</div>
@@ -776,7 +858,9 @@ export default function DiligencePage() {
               description: editingDiligence.description,
               priorite: editingDiligence.priorite,
               statut: editingDiligence.statut,
-              destinataire: editingDiligence.destinataire,
+              destinataire: Array.isArray(editingDiligence.destinataire)
+                ? editingDiligence.destinataire
+                : editingDiligence.destinataire ? [editingDiligence.destinataire] : [],
               piecesJointes: editingDiligence.piecesjointes
             } : undefined}
             onClose={() => {

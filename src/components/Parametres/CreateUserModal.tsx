@@ -9,12 +9,14 @@ interface CreateUserModalProps {
     password: string;
     name: string;
     role: string;
+    direction: string;
   }) => Promise<void>;
   editingUser?: {
     id: string;
     email?: string;
     name?: string;
     role?: string;
+    direction?: string;
   };
   isEditing?: boolean;
 }
@@ -24,7 +26,8 @@ export default function CreateUserModal({ isOpen, onClose, onCreate, editingUser
     name: "",
     email: "",
     role: "user",
-    password: ""
+    password: "",
+    direction: ""
   });
 
   // Réinitialiser les données lorsque le modal s'ouvre/ferme ou que l'utilisateur à éditer change
@@ -34,7 +37,8 @@ export default function CreateUserModal({ isOpen, onClose, onCreate, editingUser
         name: editingUser?.name || "",
         email: editingUser?.email || "",
         role: editingUser?.role || "user",
-        password: "" // Touvider le mot de passe pour l'édition
+        password: "", // Touvider le mot de passe pour l'édition
+        direction: editingUser?.direction || ""
       });
     }
   }, [isOpen, editingUser]);
@@ -46,6 +50,13 @@ export default function CreateUserModal({ isOpen, onClose, onCreate, editingUser
     setLoading(true);
     setError("");
     
+    // Validation : l'email doit se terminer par @gmail.com
+    if (!userData.email.endsWith('@gmail.com')) {
+      setError("L'adresse email doit se terminer par @gmail.com");
+      setLoading(false);
+      return;
+    }
+    
     try {
       await onCreate(userData);
       onClose();
@@ -53,7 +64,8 @@ export default function CreateUserModal({ isOpen, onClose, onCreate, editingUser
         name: "",
         email: "",
         role: "user",
-        password: ""
+        password: "",
+        direction: ""
       });
     } catch (err) {
       const error = err as Error;
@@ -142,6 +154,19 @@ export default function CreateUserModal({ isOpen, onClose, onCreate, editingUser
                   <option value="admin">Administrateur</option>
                   <option value="user">Utilisateur</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Direction
+                </label>
+                <input
+                  type="text"
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-400 transition-colors text-gray-900"
+                  value={userData.direction}
+                  onChange={(e) => setUserData({...userData, direction: e.target.value})}
+                  placeholder="Direction de l'utilisateur"
+                />
               </div>
             </div>
 

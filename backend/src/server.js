@@ -5,7 +5,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 import { initializeDatabase, getDatabase } from './database/db.js';
+import emailService from './services/emailService.js';
 
 // Configuration des chemins pour ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -112,17 +115,41 @@ app.post('/api/users', async (req, res) => {
     const saltRounds = 12;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Créer l'utilisateur
+    // Créer l'utilisateur avec un mot de passe temporaire
     const result = await database.run(
       `INSERT INTO users (email, password_hash, name, role, direction, is_active, created_at)
        VALUES (?, ?, ?, ?, ?, 1, datetime('now'))`,
       [email, passwordHash, name, role || 'user', direction || '']
     );
 
+    const userId = result.lastID;
+
+    // Générer un token de réinitialisation
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 heures
+
+    await database.run(
+      'INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)',
+      [userId, resetToken, expiresAt.toISOString()]
+    );
+
+    // Envoyer l'email de réinitialisation (en arrière-plan)
+    emailService.sendPasswordResetEmail(email, resetToken, name)
+      .then(success => {
+        if (success) {
+          console.log(`✅ Email de réinitialisation envoyé à ${email}`);
+        } else {
+          console.warn(`⚠️ Échec de l'envoi de l'email à ${email}`);
+        }
+      })
+      .catch(error => {
+        console.error(`❌ Erreur lors de l'envoi de l'email:`, error);
+      });
+
     res.status(201).json({
       success: true,
-      message: 'Utilisateur créé avec succès',
-      userId: result.lastID
+      message: 'Utilisateur créé avec succès. Un email de réinitialisation a été envoyé.',
+      userId: userId
     });
   } catch (error) {
     console.error('Erreur lors de la création de l\'utilisateur:', error);
@@ -420,6 +447,197 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
   });
+  
+  // Route pour tester la connexion SMTP
+  app.post('/api/smtp/test-connection', async (req, res) => {
+    const { host, port, secure, username, password } = req.body;
+  
+    if (!host || !port || !username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tous les champs SMTP sont requis'
+      });
+    }
+  
+    try {
+      // Créer un transporteur temporaire pour tester la connexion
+      const testTransporter = nodemailer.createTransport({
+        host: host,
+        port: parseInt(port),
+        secure: Boolean(secure),
+        auth: {
+          user: username,
+          pass: password
+        }
+      });
+  
+      // Tester la connexion avec la méthode verify()
+      await testTransporter.verify();
+  
+      res.json({
+        success: true,
+        message: 'Connexion SMTP réussie !'
+      });
+  
+    } catch (error) {
+      console.error('❌ Erreur de connexion SMTP:', error);
+      res.status(500).json({
+        success: false,
+        message: `Échec de la connexion SMTP: ${error.message}`
+      });
+    }
+  });
+  
+  // Route pour réinitialiser le mot de passe avec un token
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { token, email, password } = req.body;
+  
+  if (!token || !email || !password) {
+    return res.status(400).json({
+      success: false,
+      message: 'Token, email et nouveau mot de passe requis'
+    });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({
+      success: false,
+      message: 'Le mot de passe doit contenir au moins 6 caractères'
+    });
+  }
+
+  try {
+    const database = await getDatabase();
+    
+    // Vérifier si le token est valide et non expiré
+    const resetToken = await database.get(
+      `SELECT prt.*, u.email
+       FROM password_reset_tokens prt
+       JOIN users u ON prt.user_id = u.id
+       WHERE prt.token = ? AND u.email = ? AND prt.expires_at > datetime('now') AND prt.used = 0`,
+      [token, email]
+    );
+
+    if (!resetToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token de réinitialisation invalide, expiré ou déjà utilisé'
+      });
+    }
+
+    // Hasher le nouveau mot de passe
+    const saltRounds = 12;
+    const passwordHash = await bcrypt.hash(password, saltRounds);
+
+    // Mettre à jour le mot de passe de l'utilisateur
+    await database.run(
+      'UPDATE users SET password_hash = ?, updated_at = datetime("now") WHERE id = ?',
+      [passwordHash, resetToken.user_id]
+    );
+
+    // Marquer le token comme utilisé
+    await database.run(
+      'UPDATE password_reset_tokens SET used = 1 WHERE id = ?',
+      [resetToken.id]
+    );
+
+    res.json({
+      success: true,
+      message: 'Mot de passe réinitialisé avec succès'
+    });
+
+  } catch (error) {
+    console.error('Erreur lors de la réinitialisation du mot de passe:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur interne du serveur'
+    });
+  }
+});
+
+// Route pour sauvegarder la configuration SMTP
+app.post('/api/smtp/save-config', async (req, res) => {
+  const { host, port, secure, username, password, from_email, from_name } = req.body;
+
+  if (!host || !port || !username || !password || !from_email || !from_name) {
+    return res.status(400).json({
+      success: false,
+      message: 'Tous les champs SMTP sont requis'
+    });
+  }
+
+  try {
+    const database = await getDatabase();
+
+    // Convertir le paramètre secure en boolean
+    const isSecure = secure === 'TLS' || secure === 'SSL';
+
+    // Vérifier s'il existe déjà une configuration
+    const existingConfig = await database.get(
+      'SELECT id FROM smtp_config ORDER BY id DESC LIMIT 1'
+    );
+
+    if (existingConfig) {
+      // Mettre à jour la configuration existante
+      await database.run(
+        `UPDATE smtp_config SET
+          host = ?, port = ?, secure = ?, username = ?, password = ?,
+          from_email = ?, from_name = ?, updated_at = datetime('now')
+        WHERE id = ?`,
+        [host, parseInt(port), isSecure ? 1 : 0, username, password, from_email, from_name, existingConfig.id]
+      );
+    } else {
+      // Créer une nouvelle configuration
+      await database.run(
+        `INSERT INTO smtp_config (host, port, secure, username, password, from_email, from_name, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+        [host, parseInt(port), isSecure ? 1 : 0, username, password, from_email, from_name]
+      );
+    }
+
+    res.json({
+      success: true,
+      message: 'Configuration SMTP sauvegardée avec succès'
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur lors de la sauvegarde de la configuration SMTP:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur interne du serveur lors de la sauvegarde'
+    });
+  }
+});
+
+// Route pour obtenir la configuration SMTP
+app.get('/api/smtp/config', async (req, res) => {
+  try {
+    const database = await getDatabase();
+    const config = await database.get(
+      'SELECT * FROM smtp_config WHERE is_active = 1 ORDER BY id DESC LIMIT 1'
+    );
+
+    if (config) {
+      res.json({
+        host: config.host,
+        port: config.port,
+        secure: Boolean(config.secure),
+        username: config.username,
+        from_email: config.from_email,
+        from_name: config.from_name
+      });
+    } else {
+      res.json(null);
+    }
+
+  } catch (error) {
+    console.error('Erreur lors de la récupération de la configuration SMTP:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur interne du serveur'
+    });
+  }
+});
 
 // Route pour obtenir les diligences
 app.get('/api/diligences', async (req, res) => {

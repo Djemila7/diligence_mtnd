@@ -448,5 +448,15 @@ export default function DashboardPage() {
   const currentStats = stats || getDefaultStatistics(isAdmin);
 
   const activitesRecentes = isAdmin ? [
-    { id: 1, action: "Nouvelle diligence créée", details: "Audit financier - Ministère des Finances", temps: "Il y a 2 heures", type: "creation" },
-    { id: 2, action: "Diligence #245 terminée", details: "Vérification légale - Direction des Marchés", temps: "Aujourd'hui, 09:30
+    { id: 1, action: "Maintenance système planifiée", details: "Maintenance système - Mise à jour de sécurité", temps: "Demain, 02:00", type: "admin" },
+    { id: 2, action: "Sauvegarde BDD programmée", details: "Sauvegarde base de données - Archive mensuelle", temps: "15/02/2025", type: "admin" },
+    { id: 3, action: "Rapport mensuel généré", details: "Synthèse des activités de janvier", temps: "Hier, 16:45", type: "rapport" },
+    { id: 4, action: "Utilisateur ajouté", details: "Marie Kouamé - Analyste junior", temps: "Hier, 14:20", type: "user" },
+    { id: 5, action: "Document uploadé", details: "Contrat #2025-001.pdf", temps: "Il y a 3 jours", type: "document" }
+  ] : [
+    { id: 1, action: "Votre diligence #78 terminée", details: "Vérification documents - Projet Alpha", temps: "Aujourd'hui, 11:30", type: "completion" },
+    { id: 2, action: "Nouveau document ajouté", details: "Rapport intermédiaire.pdf", temps: "Hier, 15:45", type: "document" },
+    { id: 3, action: "Commentaire reçu", details: "Feedback sur votre travail", temps: "Hier, 14:20", type: "feedback" },
+    { id: 4, action: "Diligence assignée", details: "Contrôle qualité - Client XYZ", temps: "Il y a 2 jours", type: "assignment" },
+    { id: 5, action: "Formation complétée", details: "Module sécurité des données", temps: "Il y a 3 jours", type: "training" }
+  ];

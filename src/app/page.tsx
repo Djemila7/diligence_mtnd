@@ -15,6 +15,7 @@ interface Echeance {
   priorite: string;
   progression: number;
   type?: string;
+  statut?: string;
 }
 
 interface User {
@@ -452,8 +453,8 @@ export default function DashboardPage() {
   const currentStats = stats || getDefaultStatistics(isAdmin);
 
   const activitesRecentes = isAdmin ? [
-    { id: 1, action: "Nouvelle diligence créée", details: "Audit financier - Ministère des Finances", temps: "Il y a 2 heures", type: "creation" },
-    { id: 2, action: "Diligence #245 terminée", details: "Vérification légale - Direction des Marchés", temps: "Aujourd'hui, 09:30", type: "completion" },
+    { id: 1, action: "Maintenance système planifiée", details: "Maintenance système - Mise à jour de sécurité", temps: "Demain, 02:00", type: "admin" },
+    { id: 2, action: "Sauvegarde BDD programmée", details: "Sauvegarde base de données - Archive mensuelle", temps: "15/02/2025", type: "admin" },
     { id: 3, action: "Rapport mensuel généré", details: "Synthèse des activités de janvier", temps: "Hier, 16:45", type: "rapport" },
     { id: 4, action: "Utilisateur ajouté", details: "Marie Kouamé - Analyste junior", temps: "Hier, 14:20", type: "user" },
     { id: 5, action: "Document uploadé", details: "Contrat #2025-001.pdf", temps: "Il y a 3 jours", type: "document" }
@@ -491,29 +492,51 @@ export default function DashboardPage() {
 
     // Convertir les diligences en format d'échéance
     const echeances = userDiligences
-      .filter(d => d.statut !== 'Terminé' && d.statut !== 'En retard') // Exclure terminées et en retard
-      .map(diligence => ({
-        id: diligence.id,
-        nom: diligence.titre || 'Diligence sans titre',
-        client: diligence.client || 'Client non spécifié',
-        echeance: diligence.dateFin ? new Date(diligence.dateFin).toLocaleDateString('fr-FR') : 'Date non définie',
-        priorite: diligence.priorite || 'Moyenne',
-        progression: diligence.progression || 0,
-        type: 'diligence'
-      }))
-      .sort((a, b) => {
-        // Trier par date d'échéance (les plus proches d'abord)
-        const dateA = new Date(a.echeance);
-        const dateB = new Date(b.echeance);
-        return dateA.getTime() - dateB.getTime();
+      .filter(d => d.statut !== 'Terminé') // Exclure seulement les terminées (inclure les en retard)
+      .map(diligence => {
+        const dateFin = diligence.dateFin ? new Date(diligence.dateFin) : null;
+        const aujourdHui = new Date();
+        
+        // Déterminer si l'échéance est dépassée
+        const estEnRetard = dateFin && dateFin < aujourdHui && diligence.statut !== 'Terminé';
+        
+        return {
+          id: diligence.id,
+          nom: diligence.titre || 'Diligence sans titre',
+          client: diligence.client || 'Client non spécifié',
+          echeance: dateFin ? dateFin.toLocaleDateString('fr-FR') : 'Date non définie',
+          priorite: diligence.priorite || 'Moyenne',
+          progression: diligence.progression || 0,
+          type: 'diligence',
+          statut: diligence.statut,
+          estEnRetard: estEnRetard,
+          dateFinObj: dateFin // Garder l'objet Date pour le tri
+        };
       })
-      .slice(0, 5); // Limiter à 5 échéances
+      .sort((a, b) => {
+        // Priorité 1: Les échéances en retard d'abord
+        if (a.estEnRetard && !b.estEnRetard) return -1;
+        if (!a.estEnRetard && b.estEnRetard) return 1;
+        
+        // Priorité 2: Les échéances les plus proches d'abord
+        if (a.dateFinObj && b.dateFinObj) {
+          return a.dateFinObj.getTime() - b.dateFinObj.getTime();
+        }
+        
+        // Priorité 3: Les sans date à la fin
+        if (!a.dateFinObj && b.dateFinObj) return 1;
+        if (a.dateFinObj && !b.dateFinObj) return -1;
+        
+        return 0;
+      })
+      .slice(0, 8) // Augmenter à 8 échéances pour mieux voir les priorités
+      .map(({ dateFinObj, ...rest }) => rest); // Retirer l'objet Date pour l'affichage
 
     // Ajouter des tâches administratives pour les admins si peu d'échéances
     if (isAdmin && echeances.length < 3) {
       echeances.push(
-        { id: 1001, nom: "Maintenance système", client: "Système", echeance: "Demain, 02:00", priorite: "Haute", progression: 0, type: "admin" },
-        { id: 1002, nom: "Sauvegarde BDD", client: "Sauvegarde", echeance: "15/02/2025", priorite: "Haute", progression: 0, type: "admin" }
+        { id: 1001, nom: "Maintenance système", client: "Système", echeance: "Demain, 02:00", priorite: "Haute", progression: 0, type: "admin", statut: "Planifié", estEnRetard: false },
+        { id: 1002, nom: "Sauvegarde BDD", client: "Sauvegarde", echeance: "15/02/2025", priorite: "Haute", progression: 0, type: "admin", statut: "Planifié", estEnRetard: false }
       );
     }
 
@@ -742,8 +765,12 @@ export default function DashboardPage() {
               <thead>
                <tr className="border-b border-gray-200">
                  <th className="text-left p-3 font-semibold text-gray-700">{isAdmin ? "Tâche" : "Diligence"}</th>
-                 <th className="text-left p-3 font-semibold text-gray-700">Destinataire</th>
-                 <th className="text-left p-3 font-semibold text-gray-700">Échéance</th>
+                 {!isAdmin && (
+                   <>
+                     <th className="text-left p-3 font-semibold text-gray-700">Destinataire</th>
+                     <th className="text-left p-3 font-semibold text-gray-700">Échéance</th>
+                   </>
+                 )}
                  <th className="text-left p-3 font-semibold text-gray-700">Priorité</th>
                  <th className="text-left p-3 font-semibold text-gray-700">Progression</th>
                </tr>
@@ -799,24 +826,52 @@ export default function DashboardPage() {
                   const dateEcheance = diligence?.dateFin ? new Date(diligence.dateFin).toLocaleDateString('fr-FR') : 'Non définie';
                   console.log('📋 Date échéance:', dateEcheance);
                   
+                  const isEnRetard = diligence?.statut === 'En retard';
+                  
                   return (
-                    <tr key={echeance.id} className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${getEcheanceStyle(echeance)}`}>
-                      <td className="p-3 font-medium text-gray-800">
+                    <tr key={echeance.id} className={`border-b border-gray-100 transition-colors ${
+                      isEnRetard
+                        ? 'bg-red-50 hover:bg-red-100'
+                        : 'hover:bg-gray-50'
+                    } ${getEcheanceStyle(echeance)}`}>
+                      <td className="p-3 font-medium">
                         <div className="flex items-center space-x-2">
                           <span className="text-sm">{getEcheanceIcon(echeance)}</span>
                           <div>
-                            <div>{echeance.nom}</div>
+                            <div className={isEnRetard ? 'text-red-800 font-semibold' : 'text-gray-800'}>
+                              {echeance.nom}
+                              {isEnRetard && (
+                                <span className="ml-2 text-xs text-red-600 bg-red-100 px-2 py-1 rounded-full">
+                                  ⚠️ EN RETARD
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>
-                      <td className="p-3 text-gray-600">
-                        <div className="text-sm">
-                          {destinataireAffichage}
-                        </div>
-                      </td>
-                      <td className="p-3 text-gray-600">{dateEcheance}</td>
+                      {!isAdmin && (
+                        <>
+                          <td className="p-3">
+                            <div className={`text-sm ${isEnRetard ? 'text-red-700' : 'text-gray-600'}`}>
+                              {destinataireAffichage}
+                            </div>
+                          </td>
+                          <td className={`p-3 ${isEnRetard ? 'text-red-700 font-semibold' : 'text-gray-600'}`}>
+                            {dateEcheance}
+                            {isEnRetard && (
+                              <div className="text-xs text-red-500 mt-1">
+                                Échéance dépassée
+                              </div>
+                            )}
+                          </td>
+                        </>
+                      )}
                       <td className="p-3">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${getPrioriteColor(echeance.priorite)}`}>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                          isEnRetard
+                            ? 'bg-red-100 text-red-800 border border-red-200'
+                            : getPrioriteColor(echeance.priorite)
+                        }`}>
                           {echeance.priorite}
                         </span>
                       </td>
@@ -824,11 +879,17 @@ export default function DashboardPage() {
                         <div className="flex items-center space-x-2">
                           <div className="w-16 bg-gray-200 rounded-full h-2">
                             <div
-                              className="bg-orange-500 h-2 rounded-full transition-all duration-300"
+                              className={`h-2 rounded-full transition-all duration-300 ${
+                                isEnRetard ? 'bg-red-500' : 'bg-orange-500'
+                              }`}
                               style={{ width: `${echeance.progression}%` }}
                             ></div>
                           </div>
-                          <span className="text-sm font-medium text-gray-600">{echeance.progression}%</span>
+                          <span className={`text-sm font-medium ${
+                            isEnRetard ? 'text-red-700' : 'text-gray-600'
+                          }`}>
+                            {echeance.progression}%
+                          </span>
                         </div>
                       </td>
                     </tr>

@@ -32,6 +32,15 @@ let db;
 initializeDatabase().then(database => {
   db = database;
   console.log('✅ Base de données initialisée');
+  
+  // Démarrer le service de mise à jour automatique des diligences
+  import('./services/diligenceUpdater.js').then(updaterModule => {
+    const diligenceUpdater = updaterModule.default;
+    diligenceUpdater.startAutoUpdate(5); // Mise à jour toutes les 5 minutes
+  }).catch(error => {
+    console.error('❌ Erreur lors du chargement du service de mise à jour:', error);
+  });
+  
 }).catch(error => {
   console.error('❌ Erreur lors de l\'initialisation de la base de données:', error);
   process.exit(1);
@@ -69,10 +78,11 @@ app.post('/api/users', async (req, res) => {
     });
   }
 
-  // Validation : l'email doit se terminer par @gmail.com
-  if (!email.endsWith('@gmail.com')) {
+  // Validation : l'email doit être valide
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
     return res.status(400).json({
-      error: 'L\'adresse email doit se terminer par @gmail.com'
+      error: 'Veuillez entrer une adresse email valide'
     });
   }
 
@@ -131,10 +141,11 @@ app.put('/api/users/:id', async (req, res) => {
     });
   }
 
-  // Validation : l'email doit se terminer par @gmail.com
-  if (!email.endsWith('@gmail.com')) {
+  // Validation : l'email doit être valide
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
     return res.status(400).json({
-      error: 'L\'adresse email doit se terminer par @gmail.com'
+      error: 'Veuillez entrer une adresse email valide'
     });
   }
 
@@ -640,6 +651,24 @@ app.delete('/api/diligences/:id', async (req, res) => {
   } catch (error) {
     console.error('Erreur lors de la suppression de la diligence:', error);
     res.status(500).json({ error: 'Erreur interne du serveur' });
+  }
+});
+
+// Route pour forcer la mise à jour des statuts des diligences (admin seulement)
+app.post('/api/diligences/update-statuses', async (req, res) => {
+  try {
+    const diligenceUpdater = await import('./services/diligenceUpdater.js');
+    await diligenceUpdater.default.forceUpdate();
+    
+    res.json({
+      success: true,
+      message: 'Mise à jour des statuts des diligences effectuée avec succès'
+    });
+  } catch (error) {
+    console.error('Erreur lors de la mise à jour forcée des statuts:', error);
+    res.status(500).json({
+      error: 'Erreur interne du serveur lors de la mise à jour des statuts'
+    });
   }
 });
 

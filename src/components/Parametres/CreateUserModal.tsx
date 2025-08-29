@@ -50,9 +50,10 @@ export default function CreateUserModal({ isOpen, onClose, onCreate, editingUser
     setLoading(true);
     setError("");
     
-    // Validation : l'email doit se terminer par @gmail.com
-    if (!userData.email.endsWith('@gmail.com')) {
-      setError("L'adresse email doit se terminer par @gmail.com");
+    // Validation : l'email doit être valide
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(userData.email)) {
+      setError("Veuillez entrer une adresse email valide");
       setLoading(false);
       return;
     }

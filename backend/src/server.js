@@ -99,9 +99,9 @@ app.post('/api/users', async (req, res) => {
   try {
     const database = await getDatabase();
     
-    // Vérifier si l'utilisateur existe déjà
+    // Vérifier si l'utilisateur existe déjà (uniquement les utilisateurs actifs)
     const existingUser = await database.get(
-      'SELECT id FROM users WHERE email = ?',
+      'SELECT id FROM users WHERE email = ? AND is_active = 1',
       [email]
     );
     
@@ -194,7 +194,7 @@ app.put('/api/users/:id', async (req, res) => {
     // Vérifier si l'email est déjà utilisé par un autre utilisateur
     if (email !== user.email) {
       const existingUser = await database.get(
-        'SELECT id FROM users WHERE email = ? AND id != ?',
+        'SELECT id FROM users WHERE email = ? AND id != ? AND is_active = 1',
         [email, id]
       );
       
@@ -452,6 +452,8 @@ app.post('/api/auth/login', async (req, res) => {
   app.post('/api/smtp/test-connection', async (req, res) => {
     const { host, port, secure, username, password } = req.body;
   
+    console.log('📨 Requête de test SMTP reçue:', { host, port, secure, username });
+  
     if (!host || !port || !username || !password) {
       return res.status(400).json({
         success: false,
@@ -460,19 +462,56 @@ app.post('/api/auth/login', async (req, res) => {
     }
   
     try {
+      // Convertir correctement le paramètre secure en fonction du port
+      let secureBool;
+      const portNumber = parseInt(port);
+      
+      if (isNaN(portNumber)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Le port doit être un nombre valide'
+        });
+      }
+      
+      // Gestion spéciale pour les ports courants
+      if (portNumber === 465) {
+        secureBool = true; // SSL
+      } else if (portNumber === 587) {
+        secureBool = false; // STARTTLS (pas secure=true pour nodemailer)
+      } else if (secure === 'TLS' || secure === 'SSL' || secure === 'true') {
+        secureBool = true;
+      } else if (secure === 'false') {
+        secureBool = false;
+      } else {
+        // Déduire du port si non spécifié
+        secureBool = portNumber === 465 || portNumber === 993 || portNumber === 995;
+      }
+  
+      console.log('🔧 Configuration SMTP pour test:', {
+        host,
+        port: portNumber,
+        secure: secureBool,
+        username
+      });
+  
       // Créer un transporteur temporaire pour tester la connexion
       const testTransporter = nodemailer.createTransport({
         host: host,
-        port: parseInt(port),
-        secure: Boolean(secure),
+        port: portNumber,
+        secure: secureBool,
         auth: {
           user: username,
           pass: password
-        }
+        },
+        // Options de débogage
+        debug: true,
+        logger: true
       });
   
       // Tester la connexion avec la méthode verify()
+      console.log('🔗 Test de connexion SMTP en cours...');
       await testTransporter.verify();
+      console.log('✅ Connexion SMTP réussie !');
   
       res.json({
         success: true,
@@ -480,10 +519,25 @@ app.post('/api/auth/login', async (req, res) => {
       });
   
     } catch (error) {
-      console.error('❌ Erreur de connexion SMTP:', error);
+      console.error('❌ Erreur de connexion SMTP détaillée:');
+      console.error('Message:', error.message);
+      console.error('Code:', error.code);
+      console.error('Stack:', error.stack);
+      
+      let errorMessage = `Échec de la connexion SMTP: ${error.message}`;
+      
+      // Messages d'erreur plus spécifiques
+      if (error.code === 'EAUTH') {
+        errorMessage = 'Erreur d\'authentification - vérifiez le nom d\'utilisateur et le mot de passe';
+      } else if (error.code === 'ECONNECTION') {
+        errorMessage = 'Impossible de se connecter au serveur - vérifiez l\'hôte et le port';
+      } else if (error.code === 'ETIMEDOUT') {
+        errorMessage = 'Timeout de connexion - le serveur ne répond pas';
+      }
+  
       res.status(500).json({
         success: false,
-        message: `Échec de la connexion SMTP: ${error.message}`
+        message: errorMessage
       });
     }
   });
@@ -559,7 +613,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
 app.post('/api/smtp/save-config', async (req, res) => {
   const { host, port, secure, username, password, from_email, from_name } = req.body;
 
-  if (!host || !port || !username || !password || !from_email || !from_name) {
+  if (!host || !port || !username || !from_email || !from_name) {
     return res.status(400).json({
       success: false,
       message: 'Tous les champs SMTP sont requis'
@@ -569,36 +623,82 @@ app.post('/api/smtp/save-config', async (req, res) => {
   try {
     const database = await getDatabase();
 
-    // Convertir le paramètre secure en boolean
-    const isSecure = secure === 'TLS' || secure === 'SSL';
-
-    // Vérifier s'il existe déjà une configuration
-    const existingConfig = await database.get(
-      'SELECT id FROM smtp_config ORDER BY id DESC LIMIT 1'
-    );
-
-    if (existingConfig) {
-      // Mettre à jour la configuration existante
-      await database.run(
-        `UPDATE smtp_config SET
-          host = ?, port = ?, secure = ?, username = ?, password = ?,
-          from_email = ?, from_name = ?, updated_at = datetime('now')
-        WHERE id = ?`,
-        [host, parseInt(port), isSecure ? 1 : 0, username, password, from_email, from_name, existingConfig.id]
-      );
+    // Convertir correctement le paramètre secure en fonction du port
+    let isSecure;
+    const portNumber = parseInt(port);
+    
+    if (isNaN(portNumber)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Le port doit être un nombre valide'
+      });
+    }
+    
+    // Gestion spéciale pour les ports courants
+    if (portNumber === 465) {
+      isSecure = true; // SSL
+    } else if (portNumber === 587) {
+      isSecure = false; // STARTTLS (pas secure=true pour nodemailer)
+    } else if (secure === 'TLS' || secure === 'SSL' || secure === 'true') {
+      isSecure = true;
+    } else if (secure === 'false') {
+      isSecure = false;
     } else {
-      // Créer une nouvelle configuration
-      await database.run(
-        `INSERT INTO smtp_config (host, port, secure, username, password, from_email, from_name, is_active)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
-        [host, parseInt(port), isSecure ? 1 : 0, username, password, from_email, from_name]
-      );
+      // Déduire du port si non spécifié
+      isSecure = portNumber === 465 || portNumber === 993 || portNumber === 995;
     }
 
-    res.json({
-      success: true,
-      message: 'Configuration SMTP sauvegardée avec succès'
+    console.log('💾 Sauvegarde configuration SMTP:', {
+      host,
+      port: portNumber,
+      secure: isSecure,
+      username,
+      from_email,
+      from_name
     });
+
+    try {
+      // Désactiver TOUTES les configurations existantes (pas seulement les actives)
+      await database.run('UPDATE smtp_config SET is_active = 0');
+
+      // Si le mot de passe est fourni, l'utiliser, sinon récupérer l'ancien mot de passe
+      let finalPassword = password;
+      if (!password || password.trim() === '') {
+        // Récupérer le mot de passe de la configuration active précédente
+        const previousConfig = await database.get(
+          'SELECT password FROM smtp_config WHERE is_active = 1 ORDER BY id DESC LIMIT 1'
+        );
+        if (previousConfig) {
+          finalPassword = previousConfig.password;
+        } else {
+          // Pour la première configuration, le mot de passe doit être fourni
+          return res.status(400).json({
+            success: false,
+            message: 'Mot de passe requis pour la première configuration'
+          });
+        }
+      }
+
+      // Créer une nouvelle configuration active
+      const result = await database.run(
+        `INSERT INTO smtp_config (host, port, secure, username, password, from_email, from_name, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+        [host, portNumber, isSecure ? 1 : 0, username, finalPassword, from_email, from_name]
+      );
+
+      console.log('✅ Configuration SMTP sauvegardée avec succès, ID:', result.lastID);
+
+      res.json({
+        success: true,
+        message: password
+          ? 'Configuration SMTP sauvegardée avec succès, y compris le mot de passe'
+          : 'Configuration SMTP sauvegardée avec succès (mot de passe conservé)'
+      });
+
+    } catch (error) {
+      console.error('❌ Erreur lors de la sauvegarde SMTP:', error);
+      throw error;
+    }
 
   } catch (error) {
     console.error('❌ Erreur lors de la sauvegarde de la configuration SMTP:', error);
@@ -622,7 +722,8 @@ app.get('/api/smtp/config', async (req, res) => {
         host: config.host,
         port: config.port,
         secure: Boolean(config.secure),
-        username: config.username,
+        username: config.username, // Correction: utiliser 'username' au lieu de 'user'
+        password: config.password, // Inclure le mot de passe dans la réponse
         from_email: config.from_email,
         from_name: config.from_name
       });
@@ -632,6 +733,23 @@ app.get('/api/smtp/config', async (req, res) => {
 
   } catch (error) {
     console.error('Erreur lors de la récupération de la configuration SMTP:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur interne du serveur'
+    });
+  }
+});
+
+// Route pour réinitialiser le service email (pour forcer le rechargement de la configuration)
+app.post('/api/smtp/reinitialize', async (req, res) => {
+  try {
+    await emailService.reinitialize();
+    res.json({
+      success: true,
+      message: 'Service email réinitialisé avec succès'
+    });
+  } catch (error) {
+    console.error('❌ Erreur lors de la réinitialisation du service email:', error);
     res.status(500).json({
       success: false,
       message: 'Erreur interne du serveur'
@@ -777,10 +895,72 @@ app.post('/api/diligences', async (req, res) => {
       [titre, directiondestinataire, datedebut, datefin, description, priorite || 'Moyenne', statut || 'Planifié', destinataire, JSON.stringify(piecesjointes || []), progression || 0, created_by]
     );
 
+    const diligenceId = result.lastID;
+
+    // Récupérer les informations du créateur
+    const creator = await database.get(
+      'SELECT name FROM users WHERE id = ?',
+      [created_by]
+    );
+
+    // Envoyer des emails aux destinataires assignés (en arrière-plan)
+    if (destinataire && destinataire !== '[]' && destinataire !== '') {
+      try {
+        let destinataireIds = [];
+        
+        // Parser les destinataires (peut être un tableau JSON ou une chaîne simple)
+        if (typeof destinataire === 'string') {
+          try {
+            const parsed = JSON.parse(destinataire);
+            destinataireIds = Array.isArray(parsed) ? parsed : [parsed];
+          } catch {
+            destinataireIds = [destinataire];
+          }
+        } else if (Array.isArray(destinataire)) {
+          destinataireIds = destinataire;
+        }
+
+        if (destinataireIds.length > 0) {
+          // Récupérer les informations des utilisateurs destinataires
+          const placeholders = destinataireIds.map(() => '?').join(',');
+          const users = await database.all(
+            `SELECT id, email, name FROM users WHERE id IN (${placeholders}) AND is_active = 1`,
+            destinataireIds
+          );
+
+          // Envoyer un email à chaque destinataire
+          users.forEach(user => {
+            emailService.sendNewDiligenceEmail(
+              user.email,
+              user.name,
+              titre,
+              creator?.name || 'Un utilisateur',
+              diligenceId
+            )
+            .then(success => {
+              if (success) {
+                console.log(`✅ Email de nouvelle diligence envoyé à ${user.email}`);
+              } else {
+                console.warn(`⚠️ Échec de l'envoi de l'email à ${user.email}`);
+              }
+            })
+            .catch(error => {
+              console.error(`❌ Erreur lors de l'envoi de l'email à ${user.email}:`, error);
+            });
+          });
+
+          console.log(`📧 Emails de notification envoyés à ${users.length} destinataire(s)`);
+        }
+      } catch (emailError) {
+        console.error('❌ Erreur lors de l\'envoi des emails de notification:', emailError);
+        // Ne pas bloquer la création de la diligence en cas d'erreur d'email
+      }
+    }
+
     res.status(201).json({
       success: true,
       message: 'Diligence créée avec succès',
-      diligenceId: result.lastID
+      diligenceId: diligenceId
     });
   } catch (error) {
     console.error('Erreur lors de la création de la diligence:', error);

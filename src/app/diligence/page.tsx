@@ -281,7 +281,7 @@ export default function DiligencePage() {
         priorite: formData.priorite as "Haute" | "Moyenne" | "Basse",
         statut: formData.statut as "Planifié" | "En cours" | "Terminé" | "En retard",
         destinataire: formData.destinataire.length > 0 ? formData.destinataire : null,
-        piecesjointes: [], // Initialiser comme tableau vide
+        piecesjointes: [], // Initialiser comme tableau empty
         progression: 0,
         created_by: effectiveUser.id // Ajouter l'ID de l'utilisateur créateur
       };
@@ -298,6 +298,46 @@ export default function DiligencePage() {
 
       // Recharger les diligences pour avoir les données à jour
       await loadDiligences();
+
+      // Envoyer des notifications pour les utilisateurs assignés
+      if (formData.destinataire && formData.destinataire.length > 0) {
+        const assignedUsers = users.filter(user =>
+          formData.destinataire.includes(user.id.toString())
+        );
+        
+        console.log('Utilisateurs assignés à la diligence:', assignedUsers);
+        
+        assignedUsers.forEach(user => {
+          const notificationMessage = `📋 Nouvelle diligence assignée: "${formData.titre}"`;
+          
+          // Ajouter la notification dans l'interface
+          addNotification(notificationMessage, 'info');
+          
+          // Déclencher un événement pour informer le système de notifications
+          const eventDetail = {
+            diligenceTitle: formData.titre,
+            userId: user.id,
+            userName: user.name,
+            userEmail: user.email
+          };
+          
+          console.log('Déclenchement événement diligenceAssigned:', eventDetail);
+          
+          window.dispatchEvent(new CustomEvent('diligenceAssigned', {
+            detail: eventDetail
+          }));
+        });
+        
+        // Solution alternative: stocker les notifications dans localStorage pour les récupérer plus tard
+        const newAssignments = assignedUsers.map(user => ({
+          diligenceTitle: formData.titre,
+          userId: user.id,
+          userName: user.name,
+          timestamp: Date.now()
+        }));
+        
+        localStorage.setItem('recentDiligenceAssignments', JSON.stringify(newAssignments));
+      }
 
       setShowForm(false);
       setEditingDiligence(null);

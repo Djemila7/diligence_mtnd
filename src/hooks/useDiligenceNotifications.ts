@@ -130,6 +130,80 @@ export function useDiligenceNotifications() {
     setLastChecked(new Date());
   }, []);
 
+  // Vérifier les notifications stockées dans localStorage au chargement
+  useEffect(() => {
+    if (currentUser) {
+      try {
+        const storedAssignments = localStorage.getItem('recentDiligenceAssignments');
+        if (storedAssignments) {
+          interface Assignment {
+            diligenceTitle: string;
+            userId: number | string;
+            userName: string;
+            timestamp: number;
+          }
+          
+          const assignments: Assignment[] = JSON.parse(storedAssignments);
+          const userAssignments = assignments.filter(assignment =>
+            String(assignment.userId) === String(currentUser.id)
+          );
+          
+          if (userAssignments.length > 0) {
+            console.log('Notifications stockées trouvées pour l\'utilisateur:', userAssignments);
+            setNotificationCount(prev => prev + userAssignments.length);
+            
+            userAssignments.forEach(assignment => {
+              const message = `📋 Nouvelle diligence assignée: "${assignment.diligenceTitle}"`;
+              addNotification(message, 'info');
+            });
+            
+            // Nettoyer les notifications traitées
+            const remainingAssignments = assignments.filter(assignment =>
+              String(assignment.userId) !== String(currentUser.id)
+            );
+            localStorage.setItem('recentDiligenceAssignments', JSON.stringify(remainingAssignments));
+          }
+        }
+      } catch (error) {
+        console.error('Erreur lors de la récupération des notifications stockées:', error);
+      }
+    }
+  }, [currentUser, addNotification]);
+
+  // Écouter les événements d'attribution de diligences
+  useEffect(() => {
+    const handleDiligenceAssigned = (event: Event) => {
+      try {
+        const customEvent = event as CustomEvent;
+        const { diligenceTitle, userId, userName } = customEvent.detail;
+        
+        console.log('Événement diligenceAssigned reçu:', { diligenceTitle, userId, userName, currentUser });
+        
+        // Vérifier si la diligence est assignée à l'utilisateur courant
+        if (currentUser && String(userId) === String(currentUser.id)) {
+          console.log('Diligence assignée à l\'utilisateur courant, mise à jour du compteur');
+          
+          // Mettre à jour le compteur de notifications
+          setNotificationCount(prev => prev + 1);
+          
+          // Ajouter une notification
+          const message = `📋 Nouvelle diligence assignée: "${diligenceTitle}"`;
+          addNotification(message, 'info');
+        } else {
+          console.log('Diligence assignée à un autre utilisateur:', userId, 'vs current:', currentUser?.id);
+        }
+      } catch (error) {
+        console.error('Erreur lors du traitement de l\'événement diligenceAssigned:', error);
+      }
+    };
+
+    window.addEventListener('diligenceAssigned', handleDiligenceAssigned);
+
+    return () => {
+      window.removeEventListener('diligenceAssigned', handleDiligenceAssigned);
+    };
+  }, [currentUser, addNotification]);
+
   // Démarrer automatiquement le polling quand le composant est monté
   useEffect(() => {
     // Récupérer l'utilisateur d'abord

@@ -12,6 +12,7 @@ export default function SMTPTab() {
     from_email?: string;
     from_name?: string;
   } | null>(null);
+  const [password, setPassword] = useState('');
 
   // Charger la configuration SMTP existante au montage du composant
   useEffect(() => {
@@ -20,6 +21,7 @@ export default function SMTPTab() {
         const response = await fetch('http://localhost:3003/api/smtp/config');
         if (response.ok) {
           const config = await response.json();
+          console.log('📥 Configuration SMTP chargée:', config);
           setSmtpConfig(config);
           
           // Pré-remplir le formulaire si une configuration existe
@@ -37,6 +39,21 @@ export default function SMTPTab() {
               if (secureSelect) {
                 secureSelect.value = config.secure ? 'TLS' : 'false';
               }
+              
+              // Pré-remplir le mot de passe depuis la réponse du backend
+              if (config.password) {
+                setPassword(config.password);
+              }
+              
+              console.log('📋 Formulaire pré-rempli avec:', {
+                host: config.host,
+                port: config.port,
+                username: config.username,
+                from_email: config.from_email,
+                from_name: config.from_name,
+                secure: config.secure ? 'TLS' : 'false',
+                password: config.password ? '*** (présent)' : 'absent'
+              });
             }
           }
         }
@@ -56,13 +73,36 @@ export default function SMTPTab() {
     const form = document.getElementById('smtp-form') as HTMLFormElement;
     const formData = new FormData(form);
     
+    // Pour le test de connexion, utiliser le mot de passe de l'état React
+    // car formData.get() ne fonctionne pas quand le champ est contrôlé par React
+    if (!password || password.trim() === '') {
+      // Si le mot de passe est vide, on ne peut pas tester la connexion
+      setTestResult({
+        success: false,
+        message: 'Veuillez saisir le mot de passe SMTP pour tester la connexion'
+      });
+      setLoading(false);
+      return;
+    }
+
     const smtpConfig = {
       host: formData.get('host') as string,
       port: formData.get('port') as string,
       secure: formData.get('secure') as string,
       username: formData.get('username') as string,
-      password: formData.get('password') as string
+      password: password // Utiliser la variable d'état password
     };
+
+    // Validation : si port 587, secure doit être false/TLS, pas true/SSL
+    const portNum = parseInt(smtpConfig.port);
+    if (portNum === 587 && smtpConfig.secure === 'SSL') {
+      setTestResult({
+        success: false,
+        message: 'Erreur de configuration : Le port 587 nécessite TLS, pas SSL'
+      });
+      setLoading(false);
+      return;
+    }
 
     try {
       const response = await fetch('http://localhost:3003/api/smtp/test-connection', {
@@ -81,6 +121,7 @@ export default function SMTPTab() {
       }
 
     } catch (error: unknown) {
+      console.error('Erreur détaillée lors du test de connexion:', error);
       if (error instanceof Error) {
         setTestResult({
           success: false,
@@ -89,7 +130,7 @@ export default function SMTPTab() {
       } else {
         setTestResult({
           success: false,
-          message: 'Erreur lors du test de connexion'
+          message: 'Erreur lors du test de connexion - vérifiez la console pour plus de détails'
         });
       }
     } finally {
@@ -110,12 +151,14 @@ export default function SMTPTab() {
       port: formData.get('port') as string,
       secure: formData.get('secure') as string,
       username: formData.get('username') as string,
-      password: formData.get('password') as string,
+      password: password, // Utiliser la variable d'état password au lieu de formData
       from_email: formData.get('from_email') as string,
       from_name: formData.get('from_name') as string
     };
 
     try {
+      console.log('📤 Envoi configuration SMTP:', smtpConfig);
+      
       const response = await fetch('http://localhost:3003/api/smtp/save-config', {
         method: 'POST',
         headers: {
@@ -125,11 +168,16 @@ export default function SMTPTab() {
       });
 
       const result = await response.json();
+      console.log('📥 Réponse sauvegarde SMTP:', result);
       setTestResult(result);
 
       if (!response.ok) {
         throw new Error(result.message || 'Erreur lors de la sauvegarde');
       }
+
+      // Ne pas réinitialiser le champ mot de passe - le laisser intact après sauvegarde
+      // L'utilisateur peut voir le mot de passe qu'il a saisi
+      // Le backend renvoie maintenant le mot de passe dans la configuration
 
     } catch (error: unknown) {
       if (error instanceof Error) {
@@ -200,8 +248,19 @@ export default function SMTPTab() {
             <input
               name="password"
               type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Saisir le mot de passe SMTP"
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-400 transition-colors"
             />
+            <p className="text-xs text-gray-500 mt-1">
+              Saisir le mot de passe pour le sauvegarder. Laisser vide uniquement si vous souhaitez conserver le mot de passe actuel.
+            </p>
+            {testResult?.success && testResult.message?.includes('mot de passe') && (
+              <p className="text-xs text-green-600 mt-1 font-medium">
+                ✅ {testResult.message}
+              </p>
+            )}
           </div>
         </div>
         <div className="space-y-4">

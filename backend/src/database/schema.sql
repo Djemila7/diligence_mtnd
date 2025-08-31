@@ -3,7 +3,7 @@
 -- Table des utilisateurs
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE NOT NULL,
+    email TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     name TEXT NOT NULL,
     role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user')),
@@ -84,9 +84,10 @@ VALUES ('admin@example.com', '$2a$10$MLrPGy6hzDQzEmUaBom7.OSNaPPIWX42gf2CPL/ANmU
 INSERT OR IGNORE INTO users (email, password_hash, name, role)
 VALUES ('user@example.com', '$2a$10$tHlMPEGKKoYhcYxORYsqOOOA6WP1GYY9WJCPCHML9I/LKX/6v7eRS', 'Utilisateur Test', 'user');
 
--- Insertion d'une configuration SMTP par défaut
-INSERT OR IGNORE INTO smtp_config (host, port, secure, username, password, from_email, from_name)
-VALUES ('smtp.gmail.com', 587, 1, 'your-email@gmail.com', 'your-app-password', 'noreply@example.com', 'Système de Diligence');
+-- Insertion d'une configuration SMTP par défaut (désactivée pour éviter les conflits)
+-- Les configurations SMTP doivent être créées via l'interface administrateur
+-- INSERT OR IGNORE INTO smtp_config (host, port, secure, username, password, from_email, from_name)
+-- VALUES ('smtp.gmail.com', 587, 1, 'your-email@gmail.com', 'your-app-password', 'noreply@example.com', 'Système de Diligence');
 
 -- Table des profils utilisateurs
 CREATE TABLE IF NOT EXISTS profiles (

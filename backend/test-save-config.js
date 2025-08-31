@@ -1,0 +1,22 @@
+// Script pour tester la sauvegarde de configuration SMTP
+console.log('🧪 Test de sauvegarde de configuration SMTP');
+console.log('');
+console.log('Pour tester la sauvegarde, utilisez curl:');
+console.log('');
+console.log('curl -X POST http://localhost:3003/api/smtp/save-config \\');
+console.log('  -H "Content-Type: application/json" \\');
+console.log('  -d \'{');
+console.log('    "host": "smtp.gmail.com",');
+console.log('    "port": "587",');
+console.log('    "secure": "TLS",');
+console.log('    "username": "votre-email@gmail.com",');
+console.log('    "password": "votre-mot-de-passe-app",');
+console.log('    "from_email": "noreply@example.com",');
+console.log('    "from_name": "Système Test"');
+console.log('  }\'');
+console.log('');
+console.log('💡 Assurez-vous que:');
+console.log('   - Le backend est démarré');
+console.log('   - Le port est un nombre (587, pas "587")');
+console.log('   - Secure est "TLS" pour le port 587');
+console.log('   - Tous les champs requis sont fournis');

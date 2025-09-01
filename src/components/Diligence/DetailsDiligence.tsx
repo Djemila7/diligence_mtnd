@@ -1,13 +1,14 @@
 "use client";
-import { FC } from "react";
+import { FC, useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiClient } from "@/lib/api/client";
 
 interface DetailsDiligenceProps {
   id: string;
   title: string;
   description: string;
   date: string;
-  status: "en_cours" | "termine" | "en_attente" | "en_retard";
+  status: "en_cours" | "termine" | "en_attente" | "en_retard" | "À valider";
   directionDestinataire: string;
   destinataire: string;
   echeance: string;
@@ -15,6 +16,9 @@ interface DetailsDiligenceProps {
   commentaires: number;
   priorite: "Haute" | "Moyenne" | "Basse";
   progression: number;
+  created_by?: number;
+  currentUserId?: number;
+  onValidationComplete?: () => void;
 }
 
 const DetailsDiligence: FC<DetailsDiligenceProps> = ({
@@ -30,8 +34,41 @@ const DetailsDiligence: FC<DetailsDiligenceProps> = ({
   commentaires,
   priorite,
   progression,
+  created_by,
+  currentUserId,
+  onValidationComplete,
 }) => {
   const router = useRouter();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [comment, setComment] = useState("");
+
+  const handleValidation = async (validationStatus: "approved" | "rejected") => {
+    if (!id) return;
+    
+    setIsSubmitting(true);
+    try {
+      const response = await apiClient.validateDiligence(parseInt(id), validationStatus, comment);
+      
+      if (response.success) {
+        // Rafraîchir les données si une fonction de callback est fournie
+        if (onValidationComplete) {
+          onValidationComplete();
+        }
+        // Réinitialiser le commentaire
+        setComment("");
+      } else {
+        alert(response.error || "Erreur lors de la validation");
+      }
+    } catch (error) {
+      console.error("Erreur lors de la validation:", error);
+      alert("Erreur lors de la validation de la diligence");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Vérifier si l'utilisateur peut valider cette diligence
+  const canValidate = created_by === currentUserId && status === "À valider";
 
   return (
     <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200 w-full max-w-none">
@@ -76,7 +113,9 @@ const DetailsDiligence: FC<DetailsDiligenceProps> = ({
                   ? "bg-orange-100 text-orange-800"
                   : status === "en_retard"
                     ? "bg-red-100 text-red-800"
-                    : "bg-gray-100 text-gray-800"
+                    : status === "À valider"
+                      ? "bg-yellow-100 text-yellow-800"
+                      : "bg-gray-100 text-gray-800"
             }`}>
               {status === "termine"
                 ? "Terminé"
@@ -84,7 +123,9 @@ const DetailsDiligence: FC<DetailsDiligenceProps> = ({
                   ? "En cours"
                   : status === "en_retard"
                     ? "En retard"
-                    : "En attente"}
+                    : status === "À valider"
+                      ? "À valider"
+                      : "En attente"}
             </p>
           </div>
 
@@ -114,6 +155,46 @@ const DetailsDiligence: FC<DetailsDiligenceProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Formulaire de validation pour l'émetteur */}
+        {canValidate && (
+          <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <h3 className="text-lg font-semibold text-yellow-800 mb-3">✅ Validation requise</h3>
+            
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-yellow-700 mb-2">
+                  Commentaire (optionnel)
+                </label>
+                <textarea
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-yellow-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                  placeholder="Ajoutez un commentaire sur votre décision..."
+                />
+              </div>
+
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => handleValidation("approved")}
+                  disabled={isSubmitting}
+                  className="bg-green-500 hover:bg-green-600 disabled:bg-green-300 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                >
+                  {isSubmitting ? "Validation..." : "✅ Valider"}
+                </button>
+                
+                <button
+                  onClick={() => handleValidation("rejected")}
+                  disabled={isSubmitting}
+                  className="bg-red-500 hover:bg-red-600 disabled:bg-red-300 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                >
+                  {isSubmitting ? "Validation..." : "❌ Refuser"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

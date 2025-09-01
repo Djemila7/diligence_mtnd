@@ -122,12 +122,16 @@ class ApiClient {
 
   // Users
   async getUsers() {
-    return this.request('/users');
+    // Ajouter un timestamp pour éviter le cache du navigateur
+    const timestamp = new Date().getTime();
+    return this.request(`/users?t=${timestamp}`);
   }
 
   // Diligences
   async getDiligences() {
-    return this.request('/diligences');
+    // Ajouter un timestamp pour éviter le cache du navigateur
+    const timestamp = new Date().getTime();
+    return this.request(`/diligences?t=${timestamp}`);
   }
 
   async getDiligence(id) {
@@ -154,6 +158,13 @@ class ApiClient {
     });
   }
 
+  async markDiligenceAsViewed(diligenceId, userId) {
+    return this.request(`/diligences/${diligenceId}/mark-viewed`, {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
   // Health check
   async healthCheck() {
     return this.request('/health');
@@ -174,6 +185,54 @@ class ApiClient {
     return this.request('/auth/profile', {
       method: 'PUT',
       body: JSON.stringify(profileData),
+    });
+  }
+
+  // Traiter une diligence avec upload de fichiers
+  async traiterDiligence(diligenceId, formData) {
+    const url = `${this.baseUrl}/diligences/${diligenceId}/traitement`;
+    const token = this.token || this.getToken();
+    
+    const config = {
+      method: 'POST',
+      headers: {},
+      body: formData,
+    };
+
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    try {
+      console.log('🔍 Traitement diligence URL:', url);
+      const response = await fetch(url, config);
+      
+      if (!response.ok) {
+        let errorData = {};
+        try {
+          errorData = await response.json();
+        } catch (jsonError) {
+          console.error('❌ Failed to parse error response:', jsonError);
+        }
+        const errorMessage = errorData.error || `HTTP error! status: ${response.status}`;
+        console.error('❌ Traitement diligence error:', errorMessage, errorData);
+        throw new Error(errorMessage);
+      }
+
+      const responseData = await response.json();
+      console.log('🎉 Traitement diligence success:', responseData);
+      return responseData;
+    } catch (error) {
+      console.error('💥 Traitement diligence failed:', error);
+      throw error;
+    }
+  }
+
+  // Valider ou rejeter une diligence
+  async validateDiligence(diligenceId, validationStatus, comment = '') {
+    return this.request(`/diligences/${diligenceId}/validate`, {
+      method: 'POST',
+      body: JSON.stringify({ validation_status: validationStatus, comment }),
     });
   }
 }

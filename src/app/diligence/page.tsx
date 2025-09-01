@@ -245,7 +245,7 @@ export default function DiligencePage() {
     if (diligenceToDelete) {
       try {
         // Supprimer la diligence via l'API
-        await apiClient.deleteDiligence(diligenceToDelete.id);
+        await apiClient.deleteDiligence(parseInt(diligenceToDelete.id));
 
         setAllDiligences(prev => prev.filter(d => d.id !== diligenceToDelete.id));
         setShowDeleteModal(false);
@@ -290,7 +290,7 @@ export default function DiligencePage() {
 
       if (editingDiligence) {
         // MODIFICATION - Mettre à jour la diligence
-        await apiClient.updateDiligence(editingDiligence.id, diligenceData);
+        await apiClient.updateDiligence(parseInt(editingDiligence.id), diligenceData);
       } else {
         // CRÉATION - Créer la diligence
         await apiClient.createDiligence(diligenceData);
@@ -321,11 +321,19 @@ export default function DiligencePage() {
             userEmail: user.email
           };
           
-          console.log('Déclenchement événement diligenceAssigned:', eventDetail);
+          console.log('🔔 Déclenchement événement diligenceAssigned:', eventDetail);
           
-          window.dispatchEvent(new CustomEvent('diligenceAssigned', {
-            detail: eventDetail
-          }));
+          // Déclencher l'événement avec un délai pour s'assurer que l'écouteur est prêt
+          setTimeout(() => {
+            console.log('📤 Envoi de l\'événement diligenceAssigned...');
+            const event = new CustomEvent('diligenceAssigned', {
+              detail: eventDetail,
+              bubbles: true,
+              composed: true
+            });
+            window.dispatchEvent(event);
+            console.log('✅ Événement diligenceAssigned envoyé');
+          }, 100);
         });
         
         // Solution alternative: stocker les notifications dans localStorage pour les récupérer plus tard
@@ -429,7 +437,17 @@ export default function DiligencePage() {
     try {
       // Utiliser d'abord destinataire_details si disponible (depuis l'API mise à jour)
       if (diligence.destinataire_details && Array.isArray(diligence.destinataire_details) && diligence.destinataire_details.length > 0) {
-        return diligence.destinataire_details.map(dest => dest.name || `Utilisateur ${dest.id}`);
+        // Filtrer les entrées problématiques
+        const validDetails = diligence.destinataire_details.filter(dest =>
+          dest &&
+          dest.id !== '[object Object]' &&
+          dest.name !== 'Utilisateur [object Object]' &&
+          !dest.name?.includes('[object Object]')
+        );
+        
+        if (validDetails.length > 0) {
+          return validDetails.map(dest => dest.name || `Utilisateur ${dest.id}`);
+        }
       }
       
       // Sinon, traiter l'ancien format avec les IDs
@@ -449,16 +467,73 @@ export default function DiligencePage() {
         return ["Non spécifié"];
       }
       
-      const result = destinataireIds.map(id => {
+      // Filtrer les IDs problématiques
+      const validIds = destinataireIds.filter(id =>
+        id !== '[object Object]' &&
+        id !== 'Utilisateur [object Object]' &&
+        id !== null &&
+        id !== undefined
+      );
+      
+      const result = validIds.map(id => {
         const user = users.find(u => String(u.id) === String(id));
         return user ? user.name : `Utilisateur ${id}`;
       });
       
-      return result;
+      return result.length > 0 ? result : ["Non spécifié"];
     } catch (error) {
       console.error('Erreur lors de la conversion des destinataires:', error);
-      return ["Erreur d'affichage"];
+      return ["Non spécifié"];
     }
+  };
+
+  // Vérifier si l'utilisateur courant est un destinataire de la diligence
+  const isCurrentUserDestinataire = (diligence: Diligence): boolean => {
+    if (!currentUser || !diligence.destinataire) return false;
+    
+    try {
+      let destinataireIds: string[] = [];
+      
+      // Parser les destinataires
+      if (typeof diligence.destinataire === 'string') {
+        try {
+          const parsed = JSON.parse(diligence.destinataire);
+          destinataireIds = Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
+        } catch {
+          destinataireIds = [diligence.destinataire];
+        }
+      } else if (Array.isArray(diligence.destinataire)) {
+        destinataireIds = diligence.destinataire.map(String);
+      }
+      
+      // Vérifier si l'utilisateur courant est dans la liste des destinataires
+      return destinataireIds.some(id => String(id) === String(currentUser.id));
+    } catch (error) {
+      console.error('Erreur lors de la vérification des destinataires:', error);
+      return false;
+    }
+  };
+
+  // Vérifier si l'utilisateur peut supprimer la diligence
+  const canDeleteDiligence = (diligence: Diligence): boolean => {
+    // Les administrateurs peuvent toujours supprimer
+    if (currentUser?.role?.toLowerCase().includes('admin')) {
+      return true;
+    }
+    
+    // Les utilisateurs normaux ne peuvent pas supprimer s'ils sont destinataires
+    return !isCurrentUserDestinataire(diligence);
+  };
+
+  // Vérifier si l'utilisateur peut modifier la diligence
+  const canEditDiligence = (diligence: Diligence): boolean => {
+    // Les administrateurs peuvent toujours modifier
+    if (currentUser?.role?.toLowerCase().includes('admin')) {
+      return true;
+    }
+    
+    // Les utilisateurs normaux ne peuvent pas modifier s'ils sont destinataires
+    return !isCurrentUserDestinataire(diligence);
   };
 
   // Composant de pagination
@@ -876,24 +951,28 @@ export default function DiligencePage() {
                           </svg>
                           <span className="hidden sm:inline">Voir</span>
                         </Link>
-                        <button
-                          onClick={() => handleEditDiligence(diligence)}
-                          className="text-orange-600 hover:text-orange-900 transition-colors duration-200 flex items-center space-x-1"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                          <span className="hidden sm:inline">Modifier</span>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteDiligence(diligence)}
-                          className="text-red-600 hover:text-red-900 transition-colors duration-200 flex items-center space-x-1"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                          <span className="hidden sm:inline">Supprimer</span>
-                        </button>
+                        {canEditDiligence(diligence) && (
+                          <button
+                            onClick={() => handleEditDiligence(diligence)}
+                            className="text-orange-600 hover:text-orange-900 transition-colors duration-200 flex items-center space-x-1"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                            <span className="hidden sm:inline">Modifier</span>
+                          </button>
+                        )}
+                        {canDeleteDiligence(diligence) && (
+                          <button
+                            onClick={() => handleDeleteDiligence(diligence)}
+                            className="text-red-600 hover:text-red-900 transition-colors duration-200 flex items-center space-x-1"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            <span className="hidden sm:inline">Supprimer</span>
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

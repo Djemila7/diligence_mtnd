@@ -56,6 +56,8 @@ interface DiligenceData {
   assigned_to?: number;
   created_by?: number;
   dateFin?: string;
+  datedebut?: string;
+  directiondestinataire?: string;
   priorite?: string;
   progression?: number;
   client?: string;
@@ -494,23 +496,25 @@ export default function DashboardPage() {
     const echeances = userDiligences
       .filter(d => d.statut !== 'Terminé') // Exclure seulement les terminées (inclure les en retard)
       .map(diligence => {
-        const dateFin = diligence.dateFin ? new Date(diligence.dateFin) : null;
+        // Utiliser datefin si disponible, sinon datedebut comme fallback
+        const dateEcheance = diligence.dateFin ? new Date(diligence.dateFin) :
+                            diligence.datedebut ? new Date(diligence.datedebut) : null;
         const aujourdHui = new Date();
         
         // Déterminer si l'échéance est dépassée
-        const estEnRetard = dateFin && dateFin < aujourdHui && diligence.statut !== 'Terminé';
+        const estEnRetard = dateEcheance && dateEcheance < aujourdHui && diligence.statut !== 'Terminé';
         
         return {
           id: diligence.id,
           nom: diligence.titre || 'Diligence sans titre',
-          client: diligence.client || 'Client non spécifié',
-          echeance: dateFin ? dateFin.toLocaleDateString('fr-FR') : 'Date non définie',
+          client: diligence.directiondestinataire || diligence.client || 'Non spécifié',
+          echeance: dateEcheance ? dateEcheance.toLocaleDateString('fr-FR') : 'Date non définie',
           priorite: diligence.priorite || 'Moyenne',
           progression: diligence.progression || 0,
           type: 'diligence',
           statut: diligence.statut,
           estEnRetard: estEnRetard,
-          dateFinObj: dateFin // Garder l'objet Date pour le tri
+          dateFinObj: dateEcheance // Garder l'objet Date pour le tri
         };
       })
       .sort((a, b) => {
@@ -787,41 +791,65 @@ export default function DashboardPage() {
                   console.log('📋 User ID:', user?.id);
                   console.log('📋 Created by:', diligence?.created_by);
                   
+                  // Récupérer les noms des destinataires depuis destinataire_details fourni par le backend
                   if (diligence?.destinataire_details && diligence.destinataire_details.length > 0) {
                     // Utiliser les détails des destinataires fournis par le backend
                     destinatairesNoms = diligence.destinataire_details.map((dest: DestinataireDetail) =>
                       dest.name || `Utilisateur ${dest.id}`
                     );
-                    console.log('📋 Destinataires from details:', destinatairesNoms);
-                  } else if (diligence?.destinataire && diligence.destinataire.length > 0) {
-                    // Fallback: convertir les IDs en noms manuellement
-                    const destinataireIds = Array.isArray(diligence.destinataire) ?
-                      diligence.destinataire :
-                      [diligence.destinataire];
-                    
-                    destinatairesNoms = destinataireIds.map((id: string | number) => {
-                      const idNum = typeof id === 'string' ? parseInt(id, 10) : id;
-                      const user = usersData.find(u => u.id === idNum);
-                      return user?.name || `Utilisateur ${id}`;
-                    });
-                    console.log('📋 Destinataires from fallback:', destinatairesNoms);
-                  }
-                  
-                  // Déterminer l'affichage du destinataire selon le contexte
-                  let destinataireAffichage = 'Aucun destinataire';
-                  if (user && diligence) {
-                    console.log('📋 Comparaison created_by vs user.id:', diligence.created_by, '===', user.id);
-                    if (diligence.created_by === user.id) {
-                      // Côté émetteur : afficher le nom du destinataire
-                      destinataireAffichage = destinatairesNoms.length > 0 ? destinatairesNoms.join(', ') : 'Aucun destinataire';
-                      console.log('📋 Affichage émetteur:', destinataireAffichage);
-                    } else {
-                      // Côté destinataire : afficher le nom de l'émetteur
-                      const createur = usersData.find(u => u.id === diligence.created_by);
-                      destinataireAffichage = createur?.name || `Utilisateur ${diligence.created_by}`;
-                      console.log('📋 Affichage destinataire:', destinataireAffichage);
+                  } else if (diligence?.destinataire) {
+                    // Fallback: traiter les données brutes de destinataire
+                    try {
+                      let destinataireData = diligence.destinataire;
+                      
+                      // Si c'est une chaîne JSON, la parser
+                      if (typeof destinataireData === 'string') {
+                        try {
+                          destinataireData = JSON.parse(destinataireData);
+                        } catch (e) {
+                          // Si le parsing échoue, traiter comme une chaîne simple
+                        }
+                      }
+                      
+                      // Convertir en tableau si nécessaire
+                      const destinataires = Array.isArray(destinataireData) ?
+                        destinataireData :
+                        [destinataireData];
+                      
+                      // Convertir les identifiants en noms
+                      destinatairesNoms = destinataires.map((identifier: string | number) => {
+                        // Essayer de trouver par ID numérique
+                        if (typeof identifier === 'number' || !isNaN(Number(identifier))) {
+                          const idNum = typeof identifier === 'string' ? parseInt(identifier, 10) : identifier;
+                          const user = usersData.find(u => u.id === idNum);
+                          if (user) return user.name;
+                        }
+                        
+                        // Essayer de trouver par email
+                        if (typeof identifier === 'string' && identifier.includes('@')) {
+                          const user = usersData.find(u => u.email === identifier);
+                          if (user) return user.name;
+                        }
+                        
+                        // Fallback: afficher l'identifiant
+                        return typeof identifier === 'string' && identifier.includes('@')
+                          ? identifier.split('@')[0]
+                          : `Utilisateur ${identifier}`;
+                      });
+                    } catch (error) {
+                      console.error('Erreur lors du traitement des destinataires:', error);
+                      destinatairesNoms = ['Erreur de traitement'];
                     }
                   }
+                  
+                  // Afficher toujours le nom du destinataire
+                  let destinataireAffichage = 'Aucun destinataire';
+                  if (destinatairesNoms.length > 0) {
+                    destinataireAffichage = destinatairesNoms.join(', ');
+                  }
+                  
+                  console.log('📋 Destinataires finaux:', destinatairesNoms);
+                  console.log('📋 Affichage destinataire:', destinataireAffichage);
                   
                   const dateEcheance = diligence?.dateFin ? new Date(diligence.dateFin).toLocaleDateString('fr-FR') : 'Non définie';
                   console.log('📋 Date échéance:', dateEcheance);

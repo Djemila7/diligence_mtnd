@@ -113,6 +113,68 @@ class DiligenceUpdater {
     console.log('🔧 Mise à jour forcée des statuts des diligences...');
     await this.updateDiligenceStatuses();
   }
+
+  /**
+   * Met à jour le statut d'une diligence lorsqu'un destinataire la consulte
+   * @param {number} diligenceId - ID de la diligence
+   * @param {number} userId - ID de l'utilisateur qui consulte
+   */
+  async markAsInProgressWhenViewed(diligenceId, userId) {
+    try {
+      const database = await getDatabase();
+      
+      // Vérifier si l'utilisateur est un destinataire de cette diligence
+      const diligence = await database.get(
+        `SELECT id, statut, destinataire FROM diligences WHERE id = ?`,
+        [diligenceId]
+      );
+      
+      if (!diligence) {
+        console.log('❌ Diligence non trouvée:', diligenceId);
+        return false;
+      }
+
+      // Vérifier si l'utilisateur est un destinataire
+      let isDestinataire = false;
+      if (diligence.destinataire) {
+        let destinataires = [];
+        
+        if (typeof diligence.destinataire === 'string') {
+          try {
+            destinataires = JSON.parse(diligence.destinataire);
+          } catch {
+            destinataires = [diligence.destinataire];
+          }
+        } else if (Array.isArray(diligence.destinataire)) {
+          destinataires = diligence.destinataire;
+        }
+        
+        isDestinataire = destinataires.some(dest =>
+          dest == userId || dest.toString() === userId.toString()
+        );
+      }
+
+      if (isDestinataire && diligence.statut === 'Planifié') {
+        // Mettre à jour le statut à "En cours" si le destinataire consulte une diligence planifiée
+        const result = await database.run(
+          `UPDATE diligences
+           SET statut = 'En cours', updated_at = datetime('now')
+           WHERE id = ? AND statut = 'Planifié'`,
+          [diligenceId]
+        );
+
+        if (result.changes > 0) {
+          console.log(`✅ Diligence ${diligenceId} marquée comme "En cours" après consultation par le destinataire`);
+          return true;
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('❌ Erreur lors de la mise à jour du statut après consultation:', error);
+      return false;
+    }
+  }
 }
 
 // Export singleton instance

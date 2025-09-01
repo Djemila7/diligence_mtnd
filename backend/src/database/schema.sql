@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS diligences (
     datefin TEXT NOT NULL,
     description TEXT NOT NULL,
     priorite TEXT DEFAULT 'Moyenne' CHECK(priorite IN ('Haute', 'Moyenne', 'Basse')),
-    statut TEXT DEFAULT 'Planifié' CHECK(statut IN ('Planifié', 'En cours', 'Terminé', 'En retard')),
+    statut TEXT DEFAULT 'Planifié' CHECK(statut IN ('Planifié', 'En cours', 'Terminé', 'En retard', 'À valider')),
     destinataire TEXT DEFAULT '[]',
     piecesjointes TEXT DEFAULT '[]',
     progression INTEGER DEFAULT 0,
@@ -46,7 +46,18 @@ CREATE TABLE IF NOT EXISTS diligence_files (
     uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (diligence_id) REFERENCES diligences(id) ON DELETE CASCADE,
     FOREIGN KEY (uploaded_by) REFERENCES users(id)
-);
+  );
+  
+  -- Table des traitements des diligences
+  CREATE TABLE IF NOT EXISTS diligence_traitements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    diligence_id INTEGER NOT NULL,
+    commentaire TEXT,
+    progression INTEGER NOT NULL,
+    statut TEXT NOT NULL CHECK(statut IN ('En cours', 'Terminé', 'À valider')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (diligence_id) REFERENCES diligences(id) ON DELETE CASCADE
+  );
 
 -- Table de configuration SMTP
 CREATE TABLE IF NOT EXISTS smtp_config (
@@ -128,3 +139,18 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 CREATE INDEX IF NOT EXISTS idx_reset_tokens_token ON password_reset_tokens(token);
 CREATE INDEX IF NOT EXISTS idx_reset_tokens_user ON password_reset_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_reset_tokens_expires ON password_reset_tokens(expires_at);
+
+-- Table des validations de diligences
+CREATE TABLE IF NOT EXISTS diligence_validations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  diligence_id INTEGER NOT NULL,
+  validated_by INTEGER NOT NULL,
+  validation_status TEXT NOT NULL CHECK(validation_status IN ('approved', 'rejected')),
+  comment TEXT,
+  validated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (diligence_id) REFERENCES diligences(id) ON DELETE CASCADE,
+  FOREIGN KEY (validated_by) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_validations_diligence ON diligence_validations(diligence_id);
+CREATE INDEX IF NOT EXISTS idx_validations_user ON diligence_validations(validated_by);

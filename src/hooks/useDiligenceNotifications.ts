@@ -6,17 +6,25 @@ import { useNotifications } from "@/contexts/NotificationContext";
 
 interface Diligence {
   id: number;
-  nom: string;
-  client: string;
+  titre: string;
+  directiondestinataire: string;
+  datedebut: string;
+  datefin: string;
+  description: string;
+  priorite: string;
   statut: string;
+  destinataire: string | string[] | null;
+  destinataire_details?: {
+    id: string;
+    name: string;
+    email: string;
+  }[];
+  piecesjointes: string[];
+  progression: number;
   created_at?: string;
   updated_at?: string;
   assigned_to?: number;
-  assigned_user?: {
-    id: number;
-    name: string;
-    email: string;
-  };
+  created_by?: number;
 }
 
 interface User {
@@ -54,21 +62,76 @@ export function useDiligenceNotifications() {
       const diligences = await apiClient.getDiligences();
       
       if (Array.isArray(diligences)) {
-        // Filtrer les diligences créées depuis la dernière vérification
+        // Filtrer les diligences créées ou mises à jour depuis la dernière vérification
         const newDiligences = diligences.filter((diligence: Diligence) => {
-          if (!diligence.created_at) return false;
-          const diligenceDate = new Date(diligence.created_at);
+          if (!diligence.updated_at) return false;
+          const diligenceDate = new Date(diligence.updated_at);
           return diligenceDate > lastChecked;
         });
-
+  
+        console.log('🔍 Vérification des nouvelles diligences:', {
+          totalDiligences: diligences.length,
+          nouvellesDiligences: newDiligences.length,
+          currentUserId: currentUser?.id,
+          currentUserRole: currentUser?.role
+        });
+  
         // Filtrer les diligences assignées à l'utilisateur courant
         const userDiligences = newDiligences.filter((diligence: Diligence) => {
           // Si l'utilisateur est admin, voir toutes les diligences
           if (currentUser?.role?.toLowerCase().includes('admin')) {
+            console.log('👑 Admin: voir toutes les diligences');
             return true;
           }
-          // Sinon, seulement les diligences assignées à cet utilisateur
-          return diligence.assigned_to === currentUser?.id;
+          
+          // Vérifier si l'utilisateur est dans les destinataires
+          let isDestinataire = false;
+          
+          if (diligence.destinataire) {
+            try {
+              let destinataireIds: string[] = [];
+              
+              // Parser les destinataires (peut être string JSON, array, ou string simple)
+              if (typeof diligence.destinataire === 'string') {
+                try {
+                  const parsed = JSON.parse(diligence.destinataire);
+                  destinataireIds = Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
+                } catch {
+                  // Si ce n'est pas du JSON valide, traiter comme un ID simple
+                  destinataireIds = [diligence.destinataire];
+                }
+              } else if (Array.isArray(diligence.destinataire)) {
+                destinataireIds = diligence.destinataire.map(String);
+              }
+              
+              console.log('📋 Destinataires de la diligence:', {
+                diligenceId: diligence.id,
+                diligenceTitre: diligence.titre,
+                destinataireRaw: diligence.destinataire,
+                destinataireIds,
+                currentUserId: String(currentUser?.id)
+              });
+              
+              // Vérifier si l'utilisateur courant est dans la liste des destinataires
+              isDestinataire = destinataireIds.some(id =>
+                String(id) === String(currentUser?.id)
+              );
+              
+              console.log('✅ Utilisateur est destinataire:', isDestinataire);
+              
+            } catch (error) {
+              console.error('❌ Erreur lors du parsing des destinataires:', error);
+            }
+          }
+          
+          // Vérifier aussi l'ancien système assigned_to pour compatibilité
+          const isAssignedTo = diligence.assigned_to === currentUser?.id;
+          console.log('📌 Ancien système assigned_to:', isAssignedTo);
+          
+          const result = isDestinataire || isAssignedTo;
+          console.log('🎯 Résultat final - Diligence pour utilisateur:', result);
+          
+          return result;
         });
 
         if (userDiligences.length > 0) {
@@ -77,18 +140,20 @@ export function useDiligenceNotifications() {
           
           // Ajouter des notifications pour chaque nouvelle diligence
           userDiligences.forEach((diligence: Diligence) => {
-            let message = `Nouvelle diligence: ${diligence.nom}`;
-            if (diligence.client) {
-              message += ` - ${diligence.client}`;
-            }
+            let message = '';
             
-            if (currentUser?.role?.toLowerCase().includes('admin') && diligence.assigned_user) {
-              message += ` (Assignée à: ${diligence.assigned_user.name})`;
+            if (diligence.statut === 'À valider') {
+              message = `✅ Diligence à valider: "${diligence.titre}"`;
+            } else {
+              message = `📋 Nouvelle diligence: "${diligence.titre}"`;
+              if (diligence.directiondestinataire) {
+                message += ` - ${diligence.directiondestinataire}`;
+              }
             }
-
+  
             addNotification(message, 'info');
           });
-
+  
           // Mettre à jour la date de dernière vérification
           setLastChecked(new Date());
           
@@ -138,7 +203,7 @@ export function useDiligenceNotifications() {
         if (storedAssignments) {
           interface Assignment {
             diligenceTitle: string;
-            userId: number | string;
+            userId: string;
             userName: string;
             timestamp: number;
           }
@@ -149,7 +214,7 @@ export function useDiligenceNotifications() {
           );
           
           if (userAssignments.length > 0) {
-            console.log('Notifications stockées trouvées pour l\'utilisateur:', userAssignments);
+            console.log('📦 Notifications stockées trouvées pour l\'utilisateur:', userAssignments.length, 'diligences');
             setNotificationCount(prev => prev + userAssignments.length);
             
             userAssignments.forEach(assignment => {
@@ -165,7 +230,7 @@ export function useDiligenceNotifications() {
           }
         }
       } catch (error) {
-        console.error('Erreur lors de la récupération des notifications stockées:', error);
+        console.error('❌ Erreur lors de la récupération des notifications stockées:', error);
       }
     }
   }, [currentUser, addNotification]);
@@ -177,11 +242,19 @@ export function useDiligenceNotifications() {
         const customEvent = event as CustomEvent;
         const { diligenceTitle, userId, userName } = customEvent.detail;
         
-        console.log('Événement diligenceAssigned reçu:', { diligenceTitle, userId, userName, currentUser });
+        console.log('🔔 Événement diligenceAssigned reçu:', {
+          diligenceTitle,
+          userId,
+          userName,
+          currentUserId: currentUser?.id,
+          currentUserRole: currentUser?.role,
+          userIdType: typeof userId,
+          currentUserIdType: typeof currentUser?.id
+        });
         
         // Vérifier si la diligence est assignée à l'utilisateur courant
         if (currentUser && String(userId) === String(currentUser.id)) {
-          console.log('Diligence assignée à l\'utilisateur courant, mise à jour du compteur');
+          console.log('✅ Diligence assignée à l\'utilisateur courant, mise à jour du compteur');
           
           // Mettre à jour le compteur de notifications
           setNotificationCount(prev => prev + 1);
@@ -189,17 +262,36 @@ export function useDiligenceNotifications() {
           // Ajouter une notification
           const message = `📋 Nouvelle diligence assignée: "${diligenceTitle}"`;
           addNotification(message, 'info');
+          
+          // Stocker également dans localStorage pour récupération ultérieure
+          try {
+            const storedAssignments = localStorage.getItem('recentDiligenceAssignments');
+            const assignments = storedAssignments ? JSON.parse(storedAssignments) : [];
+            
+            assignments.push({
+              diligenceTitle,
+              userId: String(userId),
+              userName,
+              timestamp: Date.now()
+            });
+            
+            localStorage.setItem('recentDiligenceAssignments', JSON.stringify(assignments));
+          } catch (storageError) {
+            console.error('Erreur lors du stockage dans localStorage:', storageError);
+          }
         } else {
-          console.log('Diligence assignée à un autre utilisateur:', userId, 'vs current:', currentUser?.id);
+          console.log('❌ Diligence assignée à un autre utilisateur:', userId, 'vs current:', currentUser?.id);
         }
       } catch (error) {
-        console.error('Erreur lors du traitement de l\'événement diligenceAssigned:', error);
+        console.error('❌ Erreur lors du traitement de l\'événement diligenceAssigned:', error);
       }
     };
 
+    console.log('👂 Démarrage de l\'écouteur d\'événements diligenceAssigned');
     window.addEventListener('diligenceAssigned', handleDiligenceAssigned);
 
     return () => {
+      console.log('👋 Arrêt de l\'écouteur d\'événements diligenceAssigned');
       window.removeEventListener('diligenceAssigned', handleDiligenceAssigned);
     };
   }, [currentUser, addNotification]);
@@ -209,6 +301,18 @@ export function useDiligenceNotifications() {
     // Récupérer l'utilisateur d'abord
     fetchCurrentUser().then(() => {
       startPolling();
+      
+      // Test: Écouter manuellement les événements pour débogage
+      const testEventListener = (event: Event) => {
+        const customEvent = event as CustomEvent;
+        console.log('🎯 Événement test reçu:', customEvent.detail);
+      };
+      
+      window.addEventListener('diligenceAssigned', testEventListener);
+      
+      return () => {
+        window.removeEventListener('diligenceAssigned', testEventListener);
+      };
     });
     
     return () => {

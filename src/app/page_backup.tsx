@@ -460,3 +460,4 @@ export default function DashboardPage() {
     { id: 4, action: "Diligence assignée", details: "Contrôle qualité - Client XYZ", temps: "Il y a 2 jours", type: "assignment" },
     { id: 5, action: "Formation complétée", details: "Module sécurité des données", temps: "Il y a 3 jours", type: "training" }
   ];
+}

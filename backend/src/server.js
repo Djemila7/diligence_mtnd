@@ -7,6 +7,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
+import multer from 'multer';
+import fs from 'fs';
 import { initializeDatabase, getDatabase } from './database/db.js';
 import emailService from './services/emailService.js';
 
@@ -29,6 +31,39 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Configuration de multer pour l'upload de fichiers
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../../uploads');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB max par fichier
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx|xls|xlsx|txt/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Type de fichier non autorisé'));
+    }
+  }
+});
 
 // Initialiser la base de données
 let db;
@@ -757,6 +792,74 @@ app.post('/api/smtp/reinitialize', async (req, res) => {
   }
 });
 
+// Route pour envoyer des notifications par email
+app.post('/api/smtp/send-notification', async (req, res) => {
+  const { to, subject, message, type } = req.body;
+  
+  if (!to || !subject || !message) {
+    return res.status(400).json({
+      success: false,
+      message: 'Destinataire, sujet et message sont requis'
+    });
+  }
+
+  try {
+    // Formater le message HTML avec un template professionnel
+    const htmlTemplate = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+          .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; color: white; border-radius: 10px 10px 0 0; }
+          .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+          .notification { background: white; padding: 20px; border-radius: 8px; border-left: 4px solid #667eea; margin: 20px 0; }
+          .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h1>📋 Système de Diligence</h1>
+          </div>
+          <div class="content">
+            <div class="notification">
+              ${message}
+            </div>
+          </div>
+          <div class="footer">
+            <p>Cet email a été envoyé automatiquement, merci de ne pas y répondre.</p>
+            <p>© 2025 Système de Diligence. Tous droits réservés.</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const success = await emailService.sendEmail(to, subject, htmlTemplate);
+    
+    if (success) {
+      res.json({
+        success: true,
+        message: 'Notification envoyée avec succès'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Échec de l\'envoi de la notification'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Erreur lors de l\'envoi de la notification:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur interne du serveur'
+    });
+  }
+});
+
 // Route pour obtenir les diligences
 app.get('/api/diligences', async (req, res) => {
   try {
@@ -790,7 +893,15 @@ app.get('/api/diligences', async (req, res) => {
             destinataireIds = diligence.destinataire;
           }
           
-          destinataireDetails = destinataireIds.map(id => {
+          // Filtrer les IDs problématiques avant de mapper
+          const validDestinataireIds = destinataireIds.filter(id =>
+            id !== '[object Object]' &&
+            id !== 'Utilisateur [object Object]' &&
+            id !== null &&
+            id !== undefined
+          );
+          
+          destinataireDetails = validDestinataireIds.map(id => {
             const user = usersList.find(u => u.id == id);
             return user ? { id: user.id, name: user.name, email: user.email } : { id, name: `Utilisateur ${id}` };
           });
@@ -850,7 +961,15 @@ app.get('/api/diligences/:id', async (req, res) => {
           destinataireIds = diligence.destinataire;
         }
         
-        destinataireDetails = destinataireIds.map(id => {
+        // Filtrer les IDs problématiques avant de mapper
+        const validDestinataireIds = destinataireIds.filter(id =>
+          id !== '[object Object]' &&
+          id !== 'Utilisateur [object Object]' &&
+          id !== null &&
+          id !== undefined
+        );
+        
+        destinataireDetails = validDestinataireIds.map(id => {
           const user = usersList.find(u => u.id == id);
           return user ? { id: user.id, name: user.name, email: user.email } : { id, name: `Utilisateur ${id}` };
         });
@@ -874,7 +993,7 @@ app.get('/api/diligences/:id', async (req, res) => {
 
 // Route pour créer une nouvelle diligence
 app.post('/api/diligences', async (req, res) => {
-  const { titre, directiondestinataire, datedebut, datefin, description, priorite, statut, destinataire, piecesjointes, progression, created_by } = req.body;
+  const { titre, directiondestinataire, datedebut, datefin, description, priorite, statut, destinataire, piecesjointes, progression, created_by, assigned_to } = req.body;
   
   console.log("Données reçues pour création de diligence:", req.body);
   
@@ -889,35 +1008,134 @@ app.post('/api/diligences', async (req, res) => {
     
     console.log("Insertion avec created_by:", created_by);
     
-    const result = await database.run(
-      `INSERT INTO diligences (titre, directiondestinataire, datedebut, datefin, description, priorite, statut, destinataire, piecesjointes, progression, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      [titre, directiondestinataire, datedebut, datefin, description, priorite || 'Moyenne', statut || 'Planifié', destinataire, JSON.stringify(piecesjointes || []), progression || 0, created_by]
-    );
-
-    const diligenceId = result.lastID;
-
-    // Récupérer les informations du créateur
-    const creator = await database.get(
-      'SELECT name FROM users WHERE id = ?',
-      [created_by]
-    );
-
-    // Envoyer des emails aux destinataires assignés (en arrière-plan)
+    // Déterminer assigned_to: prendre le premier destinataire si disponible
+    let assignedTo = null;
+    let finalDestinataire = destinataire;
+    
     if (destinataire && destinataire !== '[]' && destinataire !== '') {
       try {
         let destinataireIds = [];
         
-        // Parser les destinataires (peut être un tableau JSON ou une chaîne simple)
+        // Parser les destinataires
         if (typeof destinataire === 'string') {
           try {
             const parsed = JSON.parse(destinataire);
             destinataireIds = Array.isArray(parsed) ? parsed : [parsed];
           } catch {
-            destinataireIds = [destinataire];
+            // Si ce n'est pas un JSON valide, vérifier si c'est un ID simple
+            if (!isNaN(parseInt(destinataire))) {
+              destinataireIds = [parseInt(destinataire)];
+            } else {
+              console.error('Format de destinataire invalide (string):', destinataire);
+              destinataireIds = [];
+            }
           }
         } else if (Array.isArray(destinataire)) {
-          destinataireIds = destinataire;
+          // Filtrer et convertir les IDs valides
+          destinataireIds = destinataire
+            .filter(dest => dest !== null && dest !== undefined && dest !== '[object Object]')
+            .map(dest => {
+              if (typeof dest === 'object' && dest !== null && dest.id) {
+                // Si c'est un objet utilisateur, prendre l'ID
+                return parseInt(dest.id);
+              } else if (typeof dest === 'number') {
+                return dest;
+              } else if (typeof dest === 'string' && !isNaN(parseInt(dest))) {
+                return parseInt(dest);
+              }
+              return null;
+            })
+            .filter(id => id !== null && !isNaN(id));
+        } else if (typeof destinataire === 'object' && destinataire !== null) {
+          // Si un seul objet utilisateur est reçu
+          if (destinataire.id) {
+            destinataireIds = [parseInt(destinataire.id)];
+          }
+        }
+        
+        // Prendre le premier destinataire comme assigned_to
+        if (destinataireIds.length > 0) {
+          assignedTo = parseInt(destinataireIds[0]);
+        }
+        
+        // S'assurer que destinataire est bien un tableau JSON d'IDs numériques
+        finalDestinataire = JSON.stringify(destinataireIds);
+        
+      } catch (error) {
+        console.error('Erreur lors du parsing des destinataires:', error);
+        finalDestinataire = '[]';
+      }
+    } else {
+      finalDestinataire = '[]';
+    }
+
+    const result = await database.run(
+      `INSERT INTO diligences (titre, directiondestinataire, datedebut, datefin, description, priorite, statut, destinataire, piecesjointes, progression, created_by, assigned_to, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+      [titre, directiondestinataire, datedebut, datefin, description, priorite || 'Moyenne', statut || 'Planifié', finalDestinataire, JSON.stringify(piecesjointes || []), progression || 0, created_by, assignedTo]
+    );
+
+    const diligenceId = result.lastID;
+
+    // Récupérer les informations du créateur
+    console.log(`🔍 Recherche de l'utilisateur créateur avec ID: ${created_by}`);
+    const creator = await database.get(
+      'SELECT name FROM users WHERE id = ? AND is_active = 1',
+      [created_by]
+    );
+    
+    let creatorName = 'Un utilisateur';
+    
+    if (!creator) {
+      console.warn(`⚠️ Utilisateur créateur avec ID ${created_by} non trouvé ou désactivé`);
+      
+      // Vérifier si l'utilisateur existe mais est désactivé
+      const inactiveUser = await database.get(
+        'SELECT name FROM users WHERE id = ? AND is_active = 0',
+        [created_by]
+      );
+      
+      if (inactiveUser) {
+        console.warn(`ℹ️ Utilisateur avec ID ${created_by} existe mais est désactivé: ${inactiveUser.name}`);
+        creatorName = inactiveUser.name;
+      } else {
+        console.warn(`❌ Aucun utilisateur trouvé avec ID ${created_by} (même désactivé)`);
+        
+        // Tentative de récupérer le nom depuis le token JWT si disponible
+        try {
+          const authHeader = req.headers['authorization'];
+          if (authHeader) {
+            const token = authHeader.split(' ')[1];
+            const decoded = jwt.verify(
+              token,
+              process.env.JWT_SECRET || 'fallback-secret-key-change-in-production'
+            );
+            if (decoded && decoded.name) {
+              creatorName = decoded.name;
+              console.log(`✅ Nom récupéré depuis le token JWT: ${creatorName}`);
+            }
+          }
+        } catch (jwtError) {
+          console.warn('❌ Impossible de récupérer le nom depuis le token JWT:', jwtError.message);
+        }
+      }
+    } else {
+      console.log(`✅ Utilisateur créateur trouvé: ${creator.name}`);
+      creatorName = creator.name;
+    }
+
+    // Envoyer des emails aux destinataires assignés (en arrière-plan)
+    if (finalDestinataire && finalDestinataire !== '[]' && finalDestinataire !== '') {
+      try {
+        let destinataireIds = [];
+        
+        // Parser les destinataires (qui est maintenant un JSON stringifié)
+        try {
+          const parsed = JSON.parse(finalDestinataire);
+          destinataireIds = Array.isArray(parsed) ? parsed : [parsed];
+        } catch {
+          console.error('Erreur lors du parsing des destinataires pour les emails:', finalDestinataire);
+          destinataireIds = [];
         }
 
         if (destinataireIds.length > 0) {
@@ -934,7 +1152,7 @@ app.post('/api/diligences', async (req, res) => {
               user.email,
               user.name,
               titre,
-              creator?.name || 'Un utilisateur',
+              creatorName,
               diligenceId
             )
             .then(success => {
@@ -969,7 +1187,7 @@ app.post('/api/diligences', async (req, res) => {
 });
 
 // Route pour modifier une diligence
-app.put('/api/diligences/:id', async (req, res) => {
+app.put('/api/diligences/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { titre, directiondestinataire, datedebut, datefin, description, priorite, statut, destinataire, piecesjointes, progression } = req.body;
   
@@ -982,9 +1200,9 @@ app.put('/api/diligences/:id', async (req, res) => {
   try {
     const database = await getDatabase();
     
-    // Vérifier si la diligence existe
+    // Vérifier si la diligence existe et récupérer ses informations
     const diligence = await database.get(
-      'SELECT id FROM diligences WHERE id = ?',
+      'SELECT d.*, creator.name as created_by_name FROM diligences d LEFT JOIN users creator ON d.created_by = creator.id WHERE d.id = ?',
       [id]
     );
     
@@ -992,6 +1210,50 @@ app.put('/api/diligences/:id', async (req, res) => {
       return res.status(404).json({
         error: 'Diligence non trouvée'
       });
+    }
+
+    // Vérifier les permissions de l'utilisateur
+    const currentUserId = req.user.id;
+    const currentUserRole = req.user.role;
+    
+    // Les administrateurs peuvent toujours modifier
+    if (currentUserRole === 'admin') {
+      // Admin peut modifier, continuer
+    } else {
+      // Vérifier si l'utilisateur est un destinataire de la diligence
+      let isRecipient = false;
+      
+      if (diligence.destinataire) {
+        try {
+          let destinataireIds = [];
+          
+          if (typeof diligence.destinataire === 'string') {
+            try {
+              const parsed = JSON.parse(diligence.destinataire);
+              destinataireIds = Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
+            } catch {
+              destinataireIds = [diligence.destinataire];
+            }
+          } else if (Array.isArray(diligence.destinataire)) {
+            destinataireIds = diligence.destinataire.map(String);
+          }
+          
+          // Vérifier si l'utilisateur courant est dans la liste des destinataires
+          isRecipient = destinataireIds.includes(String(currentUserId));
+        } catch (error) {
+          console.error('Erreur lors de la vérification des destinataires:', error);
+        }
+      }
+      
+      // Les destinataires ne peuvent pas modifier les diligences
+      if (isRecipient) {
+        return res.status(403).json({
+          error: 'Accès refusé : les destinataires ne peuvent pas modifier les diligences'
+        });
+      }
+      
+      // Pour les autres utilisateurs (créateur ou autres), permettre la modification
+      // Note: Le créateur peut modifier car il n'est pas destinataire
     }
 
     await database.run(
@@ -1013,7 +1275,7 @@ app.put('/api/diligences/:id', async (req, res) => {
 });
 
 // Route pour supprimer une diligence
-app.delete('/api/diligences/:id', async (req, res) => {
+app.delete('/api/diligences/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   
   if (!id) {
@@ -1025,9 +1287,9 @@ app.delete('/api/diligences/:id', async (req, res) => {
   try {
     const database = await getDatabase();
     
-    // Vérifier si la diligence existe
+    // Vérifier si la diligence existe et récupérer ses informations
     const diligence = await database.get(
-      'SELECT id FROM diligences WHERE id = ?',
+      'SELECT d.*, creator.name as created_by_name FROM diligences d LEFT JOIN users creator ON d.created_by = creator.id WHERE d.id = ?',
       [id]
     );
     
@@ -1035,6 +1297,50 @@ app.delete('/api/diligences/:id', async (req, res) => {
       return res.status(404).json({
         error: 'Diligence non trouvée'
       });
+    }
+
+    // Vérifier les permissions de l'utilisateur
+    const currentUserId = req.user.id;
+    const currentUserRole = req.user.role;
+    
+    // Les administrateurs peuvent toujours supprimer
+    if (currentUserRole === 'admin') {
+      // Admin peut supprimer, continuer
+    } else {
+      // Vérifier si l'utilisateur est un destinataire de la diligence
+      let isRecipient = false;
+      
+      if (diligence.destinataire) {
+        try {
+          let destinataireIds = [];
+          
+          if (typeof diligence.destinataire === 'string') {
+            try {
+              const parsed = JSON.parse(diligence.destinataire);
+              destinataireIds = Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
+            } catch {
+              destinataireIds = [diligence.destinataire];
+            }
+          } else if (Array.isArray(diligence.destinataire)) {
+            destinataireIds = diligence.destinataire.map(String);
+          }
+          
+          // Vérifier si l'utilisateur courant est dans la liste des destinataires
+          isRecipient = destinataireIds.includes(String(currentUserId));
+        } catch (error) {
+          console.error('Erreur lors de la vérification des destinataires:', error);
+        }
+      }
+      
+      // Les destinataires ne peuvent pas supprimer les diligences
+      if (isRecipient) {
+        return res.status(403).json({
+          error: 'Accès refusé : les destinataires ne peuvent pas supprimer les diligences'
+        });
+      }
+      
+      // Pour les autres utilisateurs (créateur ou autres), permettre la suppression
+      // Note: Le créateur peut supprimer car il n'est pas destinataire
     }
 
     await database.run(
@@ -1070,20 +1376,315 @@ app.post('/api/diligences/update-statuses', async (req, res) => {
   }
 });
 
+// Route pour marquer une diligence comme "En cours" lorsqu'un destinataire la consulte
+app.post('/api/diligences/:id/mark-viewed', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'ID utilisateur requis' });
+    }
+
+    const diligenceUpdater = await import('./services/diligenceUpdater.js');
+    const updated = await diligenceUpdater.default.markAsInProgressWhenViewed(parseInt(id), parseInt(userId));
+    
+    res.json({
+      success: true,
+      updated,
+      message: updated ? 'Statut mis à jour avec succès' : 'Aucune mise à jour nécessaire'
+    });
+  } catch (error) {
+    console.error('Erreur lors de la mise à jour du statut après consultation:', error);
+    res.status(500).json({ error: 'Erreur interne du serveur' });
+  }
+});
+
+// Route pour traiter une diligence (soumission de documents et mise à jour)
+app.post('/api/diligences/:id/traitement', authenticateToken, upload.array('fichiers', 10), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { commentaire, progression, statut } = req.body;
+    const fichiers = req.files || [];
+    const database = await getDatabase();
+    
+    console.log('📋 Traitement de la diligence - Données reçues:', {
+      diligenceId: id,
+      commentaire,
+      progression,
+      statut,
+      fichiersCount: fichiers.length,
+      fichiers: fichiers.map(f => f.originalname)
+    });
+
+    // Vérifier si la diligence existe
+    const diligence = await database.get(
+      'SELECT d.*, creator.email as created_by_email, creator.name as created_by_name FROM diligences d LEFT JOIN users creator ON d.created_by = creator.id WHERE d.id = ?',
+      [id]
+    );
+    
+    if (!diligence) {
+      // Nettoyer les fichiers uploadés en cas d'erreur
+      fichiers.forEach(file => {
+        fs.unlink(file.path, () => {});
+      });
+      return res.status(404).json({
+        success: false,
+        error: 'Diligence non trouvée'
+      });
+    }
+
+    // Mettre à jour la diligence - si le statut est "Terminé", passer à "À valider"
+    const newStatut = statut === "Terminé" ? "À valider" : statut;
+    
+    await database.run(
+      `UPDATE diligences
+       SET progression = ?, statut = ?, updated_at = datetime('now')
+       WHERE id = ?`,
+      [parseInt(progression), newStatut, id]
+    );
+
+    // Enregistrer les informations de traitement dans une table dédiée
+    await database.run(
+      `INSERT INTO diligence_traitements (diligence_id, commentaire, progression, statut, created_at)
+       VALUES (?, ?, ?, ?, datetime('now'))`,
+      [id, commentaire, progression, newStatut]
+    );
+
+    // Enregistrer les fichiers uploadés
+    for (const file of fichiers) {
+      await database.run(
+        `INSERT INTO diligence_files (diligence_id, file_name, file_path, file_size, mime_type, uploaded_by, uploaded_at)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+        [id, file.originalname, file.path, file.size, file.mimetype, req.user?.id || 0]
+      );
+    }
+
+    console.log('✅ Diligence mise à jour avec succès');
+
+    // Envoyer une notification email au créateur de la diligence
+    if (diligence.created_by_email) {
+      const subject = statut === "Terminé"
+        ? `✅ Diligence terminée - ${diligence.titre} (À valider)`
+        : `📋 Diligence traitée - ${diligence.titre}`;
+      
+      const message = statut === "Terminé"
+        ? `
+          <p>Bonjour ${diligence.created_by_name},</p>
+          <p>La diligence "<strong>${diligence.titre}</strong>" a été terminée et est maintenant en attente de validation.</p>
+          <p><strong>Progression:</strong> ${progression}%</p>
+          ${commentaire ? `<p><strong>Commentaire:</strong> ${commentaire}</p>` : ''}
+          ${fichiers.length > 0 ? `<p><strong>Fichiers joints:</strong> ${fichiers.length} document(s)</p>` : ''}
+          <p><strong>Action requise:</strong> Veuillez valider ou rejeter le travail effectué dans votre tableau de bord.</p>
+          <p><a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/diligence/${id}" style="color: #007bff; text-decoration: none;">→ Valider la diligence</a></p>
+        `
+        : `
+          <p>Bonjour ${diligence.created_by_name},</p>
+          <p>La diligence "<strong>${diligence.titre}</strong>" a été mise à jour.</p>
+          <p><strong>Nouveau statut:</strong> ${statut}</p>
+          <p><strong>Progression:</strong> ${progression}%</p>
+          ${commentaire ? `<p><strong>Commentaire:</strong> ${commentaire}</p>` : ''}
+          ${fichiers.length > 0 ? `<p><strong>Fichiers joints:</strong> ${fichiers.length} document(s)</p>` : ''}
+          <p>Vous pouvez consulter les détails dans votre tableau de bord.</p>
+        `;
+
+      try {
+        // Utiliser directement le service email plutôt que l'API frontend
+        const emailSuccess = await emailService.sendEmail(
+          diligence.created_by_email,
+          subject,
+          message
+        );
+
+        if (emailSuccess) {
+          console.log('✅ Notification email envoyée au créateur');
+        } else {
+          console.warn('⚠️ Échec de l\'envoi de la notification email');
+        }
+      } catch (emailError) {
+        console.error('❌ Erreur lors de l\'envoi de l\'email:', emailError);
+        // Ne pas bloquer le traitement en cas d'erreur d'email
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Diligence traitée avec succès. Une notification a été envoyée au créateur.'
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur lors du traitement de la diligence:', error);
+    
+    // Nettoyer les fichiers uploadés en cas d'erreur
+    if (req.files) {
+      req.files.forEach(file => {
+        fs.unlink(file.path, () => {});
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Erreur interne du serveur lors du traitement'
+    });
+  }
+});
+
+// Route pour valider ou rejeter une diligence
+app.post('/api/diligences/:id/validate', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { validation_status, comment } = req.body;
+    
+    if (!validation_status || !['approved', 'rejected'].includes(validation_status)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Statut de validation requis (approved ou rejected)'
+      });
+    }
+
+    const database = await getDatabase();
+    
+    // Vérifier si la diligence existe et récupérer ses informations
+    const diligence = await database.get(`
+      SELECT d.*, creator.email as created_by_email, creator.name as created_by_name
+      FROM diligences d
+      LEFT JOIN users creator ON d.created_by = creator.id
+      WHERE d.id = ?
+    `, [id]);
+    
+    if (!diligence) {
+      return res.status(404).json({
+        success: false,
+        error: 'Diligence non trouvée'
+      });
+    }
+
+    // Vérifier que la diligence est en statut "À valider"
+    if (diligence.statut !== 'À valider') {
+      return res.status(400).json({
+        success: false,
+        error: 'La diligence n\'est pas en attente de validation'
+      });
+    }
+
+    // Vérifier que l'utilisateur est le créateur de la diligence
+    if (diligence.created_by !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Seul le créateur de la diligence peut la valider'
+      });
+    }
+
+    // Enregistrer la validation
+    await database.run(
+      `INSERT INTO diligence_validations (diligence_id, validated_by, validation_status, comment, validated_at)
+       VALUES (?, ?, ?, ?, datetime('now'))`,
+      [id, req.user.id, validation_status, comment || null]
+    );
+
+    // Mettre à jour le statut de la diligence
+    const newStatut = validation_status === 'approved' ? 'Terminé' : 'En cours';
+    await database.run(
+      `UPDATE diligences SET statut = ?, updated_at = datetime('now') WHERE id = ?`,
+      [newStatut, id]
+    );
+
+    // Envoyer une notification email au destinataire
+    if (diligence.destinataire) {
+      try {
+        let destinataireIds = [];
+        
+        // Parser les destinataires
+        if (typeof diligence.destinataire === 'string') {
+          try {
+            const parsed = JSON.parse(diligence.destinataire);
+            destinataireIds = Array.isArray(parsed) ? parsed : [parsed];
+          } catch {
+            destinataireIds = [diligence.destinataire];
+          }
+        } else if (Array.isArray(diligence.destinataire)) {
+          destinataireIds = diligence.destinataire;
+        }
+
+        if (destinataireIds.length > 0) {
+          const placeholders = destinataireIds.map(() => '?').join(',');
+          const users = await database.all(
+            `SELECT id, email, name FROM users WHERE id IN (${placeholders}) AND is_active = 1`,
+            destinataireIds
+          );
+
+          // Envoyer un email à chaque destinataire
+          users.forEach(user => {
+            const subject = validation_status === 'approved'
+              ? `✅ Diligence validée - ${diligence.titre}`
+              : `❌ Diligence rejetée - ${diligence.titre}`;
+            
+            const message = validation_status === 'approved'
+              ? `
+                <p>Bonjour ${user.name},</p>
+                <p>Votre travail sur la diligence "<strong>${diligence.titre}</strong>" a été validé avec succès.</p>
+                ${comment ? `<p><strong>Commentaire du validateur:</strong> ${comment}</p>` : ''}
+                <p>Félicitations pour votre travail !</p>
+              `
+              : `
+                <p>Bonjour ${user.name},</p>
+                <p>Votre travail sur la diligence "<strong>${diligence.titre}</strong>" a été rejeté.</p>
+                ${comment ? `<p><strong>Commentaire du validateur:</strong> ${comment}</p>` : ''}
+                <p>Veuillez reprendre le travail et soumettre à nouveau la diligence une fois terminée.</p>
+              `;
+
+            emailService.sendEmail(
+              user.email,
+              subject,
+              message
+            )
+            .then(success => {
+              if (success) {
+                console.log(`✅ Email de validation envoyé à ${user.email}`);
+              } else {
+                console.warn(`⚠️ Échec de l'envoi de l'email à ${user.email}`);
+              }
+            })
+            .catch(error => {
+              console.error(`❌ Erreur lors de l'envoi de l'email à ${user.email}:`, error);
+            });
+          });
+        }
+      } catch (emailError) {
+        console.error('❌ Erreur lors de l\'envoi des emails de validation:', emailError);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: validation_status === 'approved'
+        ? 'Diligence validée avec succès'
+        : 'Diligence rejetée avec succès'
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur lors de la validation de la diligence:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erreur interne du serveur lors de la validation'
+    });
+  }
+});
+
 // Gestion des erreurs 404
 app.use('*', (req, res) => {
-  res.status(404).json({ 
+  res.status(404).json({
     error: 'Route non trouvée',
-    path: req.originalUrl 
+    path: req.originalUrl
   });
 });
 
 // Gestion des erreurs globales
 app.use((err, req, res, next) => {
   console.error('Erreur serveur:', err);
-  res.status(500).json({ 
+  res.status(500).json({
     error: 'Erreur interne du serveur',
-    message: err.message 
+    message: err.message
   });
 });
 
@@ -1093,6 +1694,7 @@ app.listen(PORT, () => {
   console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
   console.log(`👥 API Utilisateurs: http://localhost:${PORT}/api/users`);
   console.log(`📋 API Diligences: http://localhost:${PORT}/api/diligences`);
+  console.log(`👁️  API Mark Viewed: http://localhost:${PORT}/api/diligences/:id/mark-viewed`);
 });
 
 export default app;

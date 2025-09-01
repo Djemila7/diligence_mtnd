@@ -5,16 +5,25 @@ import { apiClient } from "@/lib/api/client";
 
 interface Diligence {
   id: number;
-  nom: string;
-  client: string;
+  titre: string;
+  directiondestinataire: string;
+  datedebut: string;
+  datefin: string;
+  description: string;
+  priorite: string;
   statut: string;
-  created_at: string;
-  assigned_to?: number;
-  assigned_user?: {
-    id: number;
+  destinataire: string | string[] | null;
+  destinataire_details?: {
+    id: string;
     name: string;
     email: string;
-  };
+  }[];
+  piecesjointes: string[];
+  progression: number;
+  created_at: string;
+  updated_at: string;
+  assigned_to?: number;
+  created_by?: number;
 }
 
 interface DiligenceNotificationsModalProps {
@@ -134,7 +143,7 @@ export function DiligenceNotificationsModal({
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <h4 className="font-medium text-gray-900 text-sm mb-1">
-                        {diligence.nom}
+                        {diligence.titre}
                       </h4>
                       {diligence.client && (
                         <p className="text-gray-600 text-xs mb-2">

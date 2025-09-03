@@ -1,14 +1,13 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3003/api';
 
-export async function POST(
-  request: Request,
+export async function GET(
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
     const id = params.id;
-    const { userId } = await request.json();
     
     // Récupérer le token d'authentification de l'en-tête
     const authHeader = request.headers.get('Authorization');
@@ -21,20 +20,22 @@ export async function POST(
       headers.Authorization = authHeader;
     }
 
-    const response = await fetch(`${BACKEND_URL}/api/diligences/${id}/mark-viewed`, {
-      method: 'POST',
+    // Appeler le backend pour récupérer les traitements
+    const response = await fetch(`${BACKEND_URL}/api/diligences/${id}/traitements`, {
+      method: 'GET',
       headers,
-      body: JSON.stringify({ userId }),
     });
 
     if (!response.ok) {
       throw new Error(`Backend responded with status ${response.status}`);
     }
 
-    const result = await response.json();
-    return NextResponse.json(result);
+    const traitements = await response.json();
+
+    return NextResponse.json(traitements);
+
   } catch (error: unknown) {
-    console.error('Error marking diligence as viewed:', error);
+    console.error('Error fetching diligence traitements:', error);
     return NextResponse.json(
       { 
         error: error instanceof Error ? error.message : 'Internal server error',

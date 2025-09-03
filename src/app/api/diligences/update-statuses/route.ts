@@ -4,7 +4,7 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:300
 
 export async function POST() {
   try {
-    const response = await fetch(`${BACKEND_URL}/diligences/update-statuses`, {
+    const response = await fetch(`${BACKEND_URL}/api/diligences/update-statuses`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

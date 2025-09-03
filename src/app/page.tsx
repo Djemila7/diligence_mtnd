@@ -76,8 +76,21 @@ export default function DashboardPage() {
   const [previousStats, setPreviousStats] = useState<Statistics | null>(null);
   const { addNotification } = useNotifications();
   const { stats: evolutionStats } = useStatsEvolution();
+  const [refreshKey, setRefreshKey] = useState(Date.now());
 
   useEffect(() => {
+    // Nettoyer tous les caches de diligences au démarrage
+    if (typeof window !== 'undefined') {
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.includes('diligence')) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+    }
+
     const checkUser = async () => {
       try {
         const token = apiClient.getToken();
@@ -127,12 +140,41 @@ export default function DashboardPage() {
             setDiligencesData(diligences || []);
             
             const calculateRealStatistics = (diligences: DiligenceData[]): Statistics => {
-              const enCours = diligences.filter(d => d.statut === 'En cours').length;
-              const terminees = diligences.filter(d => d.statut === 'Terminé').length;
-              const planifiees = diligences.filter(d => d.statut === 'Planifié').length;
-              const enRetard = diligences.filter(d => d.statut === 'En retard').length;
+              // Filtrer les diligences selon le rôle de l'utilisateur
+              let userDiligences = diligences;
               
-              const tauxCompletion = terminees > 0 ? Math.round((terminees / diligences.length) * 100) : 0;
+              if (user && !(user.role === 'admin' || user.role === 'Administrateur')) {
+                // Pour les utilisateurs normaux : ne montrer que leurs propres diligences
+                console.log('🔍 Filtrage pour utilisateur:', user.id, user.name, user.role);
+                console.log('🔍 Total diligences avant filtrage:', diligences.length);
+                
+                userDiligences = diligences.filter(diligence =>
+                  diligence.assigned_to === user.id ||
+                  (Array.isArray(diligence.destinataire) && diligence.destinataire.includes(user.id.toString())) ||
+                  diligence.created_by === user.id
+                );
+                
+                console.log('🔍 Diligences après filtrage:', userDiligences.length);
+                console.log('🔍 Détails des diligences filtrées:', userDiligences.map(d => ({
+                  id: d.id,
+                  titre: d.titre,
+                  assigned_to: d.assigned_to,
+                  created_by: d.created_by,
+                  destinataire: d.destinataire,
+                  statut: d.statut
+                })));
+              } else if (user) {
+                console.log('🔍 Utilisateur admin:', user.name, ' - Voir toutes les diligences');
+              }
+              
+              const enCours = userDiligences.filter(d => d.statut === 'En cours').length;
+              const terminees = userDiligences.filter(d => d.statut === 'Terminé').length;
+              const planifiees = userDiligences.filter(d => d.statut === 'Planifié').length;
+              const enRetard = userDiligences.filter(d => d.statut === 'En retard').length;
+              
+              console.log('📊 Statistiques calculées:', { enCours, terminees, planifiees, enRetard });
+              
+              const tauxCompletion = terminees > 0 ? Math.round((terminees / userDiligences.length) * 100) : 0;
           
               // Calculer l'évolution par rapport aux statistiques précédentes
               let evolutionEnCours = 0;
@@ -153,12 +195,6 @@ export default function DashboardPage() {
               let mesRapports = 0;
           
               if (!isAdmin && user) {
-                // Pour les utilisateurs normaux : documents des diligences assignées
-                const userDiligences = diligences.filter(diligence =>
-                  diligence.assigned_to === user.id ||
-                  (Array.isArray(diligence.destinataire) && diligence.destinataire.includes(user.id.toString()))
-                );
-                
                 // Compter les documents des diligences assignées
                 mesDocuments = userDiligences.reduce((total, diligence) => {
                   return total + (Array.isArray(diligence.piecesJointes) ? diligence.piecesJointes.length : 0);
@@ -224,7 +260,28 @@ export default function DashboardPage() {
 
 
     checkUser();
-  }, [router]);
+  }, [router, refreshKey]);
+
+  // Effet pour détecter l'actualisation de la page et forcer le rechargement
+  useEffect(() => {
+    // Méthode simple : forcer le rechargement au montage du composant
+    // Cela garantit que les données sont toujours fraîches
+    console.log('🔄 Chargement initial des données...');
+    
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // La page est redevenue visible (potentiellement après actualisation)
+        console.log('🔄 Page redevenue visible, rechargement des données...');
+        setRefreshKey(Date.now());
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   const loadDiligencesData = async () => {
     try {
@@ -232,12 +289,33 @@ export default function DashboardPage() {
       setDiligencesData(diligences || []);
       
       const calculateRealStatistics = (diligences: DiligenceData[]): Statistics => {
-        const enCours = diligences.filter(d => d.statut === 'En cours').length;
-        const terminees = diligences.filter(d => d.statut === 'Terminé').length;
-        const planifiees = diligences.filter(d => d.statut === 'Planifié').length;
-        const enRetard = diligences.filter(d => d.statut === 'En retard').length;
+        // Filtrer les diligences selon le rôle de l'utilisateur
+        let userDiligences = diligences;
         
-        const tauxCompletion = terminees > 0 ? Math.round((terminees / diligences.length) * 100) : 0;
+        if (user && !(user.role === 'admin' || user.role === 'Administrateur')) {
+          // Pour les utilisateurs normaux : ne montrer que leurs propres diligences
+          console.log('🔍 Filtrage pour utilisateur (loadDiligences):', user.id, user.name, user.role);
+          console.log('🔍 Total diligences avant filtrage:', diligences.length);
+          
+          userDiligences = diligences.filter(diligence =>
+            diligence.assigned_to === user.id ||
+            (Array.isArray(diligence.destinataire) && diligence.destinataire.includes(user.id.toString())) ||
+            diligence.created_by === user.id
+          );
+          
+          console.log('🔍 Diligences après filtrage:', userDiligences.length);
+        } else if (user) {
+          console.log('🔍 Utilisateur admin (loadDiligences):', user.name, ' - Voir toutes les diligences');
+        }
+        
+        const enCours = userDiligences.filter(d => d.statut === 'En cours').length;
+        const terminees = userDiligences.filter(d => d.statut === 'Terminé').length;
+        const planifiees = userDiligences.filter(d => d.statut === 'Planifié').length;
+        const enRetard = userDiligences.filter(d => d.statut === 'En retard').length;
+        
+        console.log('📊 Statistiques calculées (loadDiligences):', { enCours, terminees, planifiees, enRetard });
+        
+        const tauxCompletion = terminees > 0 ? Math.round((terminees / userDiligences.length) * 100) : 0;
     
         // Calculer l'évolution par rapport aux statistiques précédentes
         let evolutionEnCours = 0;
@@ -258,12 +336,6 @@ export default function DashboardPage() {
         let mesRapports = 0;
     
         if (!isAdmin && user) {
-          // Pour les utilisateurs normaux : documents des diligences assignées
-          const userDiligences = diligences.filter(diligence =>
-            diligence.assigned_to === user.id ||
-            (Array.isArray(diligence.destinataire) && diligence.destinataire.includes(user.id.toString()))
-          );
-          
           // Compter les documents des diligences assignées
           mesDocuments = userDiligences.reduce((total, diligence) => {
             return total + (Array.isArray(diligence.piecesJointes) ? diligence.piecesJointes.length : 0);
@@ -335,12 +407,33 @@ export default function DashboardPage() {
         
         // Recalculer les statistiques
         const calculateRealStatistics = (diligences: DiligenceData[]): Statistics => {
-          const enCours = diligences.filter(d => d.statut === 'En cours').length;
-          const terminees = diligences.filter(d => d.statut === 'Terminé').length;
-          const planifiees = diligences.filter(d => d.statut === 'Planifié').length;
-          const enRetard = diligences.filter(d => d.statut === 'En retard').length;
+          // Filtrer les diligences selon le rôle de l'utilisateur
+          let userDiligences = diligences;
           
-          const tauxCompletion = terminees > 0 ? Math.round((terminees / diligences.length) * 100) : 0;
+          if (user && !(user.role === 'admin' || user.role === 'Administrateur')) {
+            // Pour les utilisateurs normaux : ne montrer que leurs propres diligences
+            console.log('🔍 Filtrage pour utilisateur (polling):', user.id, user.name, user.role);
+            console.log('🔍 Total diligences avant filtrage:', diligences.length);
+            
+            userDiligences = diligences.filter(diligence =>
+              diligence.assigned_to === user.id ||
+              (Array.isArray(diligence.destinataire) && diligence.destinataire.includes(user.id.toString())) ||
+              diligence.created_by === user.id
+            );
+            
+            console.log('🔍 Diligences après filtrage:', userDiligences.length);
+          } else if (user) {
+            console.log('🔍 Utilisateur admin (polling):', user.name, ' - Voir toutes les diligences');
+          }
+          
+          const enCours = userDiligences.filter(d => d.statut === 'En cours').length;
+          const terminees = userDiligences.filter(d => d.statut === 'Terminé').length;
+          const planifiees = userDiligences.filter(d => d.statut === 'Planifié').length;
+          const enRetard = userDiligences.filter(d => d.statut === 'En retard').length;
+          
+          console.log('📊 Statistiques calculées (polling):', { enCours, terminees, planifiees, enRetard });
+          
+          const tauxCompletion = terminees > 0 ? Math.round((terminees / userDiligences.length) * 100) : 0;
       
           const isAdmin = user?.role === 'admin' || user?.role === 'Administrateur';
           
@@ -349,12 +442,6 @@ export default function DashboardPage() {
           let mesRapports = 0;
       
           if (!isAdmin && user) {
-            // Pour les utilisateurs normaux : documents des diligences assignées
-            const userDiligences = diligences.filter(diligence =>
-              diligence.assigned_to === user.id ||
-              (Array.isArray(diligence.destinataire) && diligence.destinataire.includes(user.id.toString()))
-            );
-            
             // Compter les documents des diligences assignées
             mesDocuments = userDiligences.reduce((total, diligence) => {
               return total + (Array.isArray(diligence.piecesJointes) ? diligence.piecesJointes.length : 0);
@@ -411,26 +498,26 @@ export default function DashboardPage() {
 
   const getDefaultStatistics = (isAdmin: boolean): Statistics => {
     return isAdmin ? {
-      diligencesEnCours: 24,
-      diligencesTerminees: 156,
-      diligencesPlanifiees: 18,
-      diligencesEnRetard: 3,
-      tauxCompletion: 87,
-      evolutionEnCours: 12,
-      evolutionTerminees: 8,
-      utilisateursActifs: 247,
-      documentsTraites: 1248,
-      rapportsGeneres: 89
-    } : {
-      diligencesEnCours: 3,
-      diligencesTerminees: 12,
-      diligencesPlanifiees: 2,
+      diligencesEnCours: 0,
+      diligencesTerminees: 0,
+      diligencesPlanifiees: 0,
       diligencesEnRetard: 0,
-      tauxCompletion: 92,
-      evolutionEnCours: 5,
-      evolutionTerminees: 3,
-      mesDocuments: 0, // Maintenant calculé dynamiquement
-      mesRapports: 0   // Maintenant calculé dynamiquement
+      tauxCompletion: 0,
+      evolutionEnCours: 0,
+      evolutionTerminees: 0,
+      utilisateursActifs: 0,
+      documentsTraites: 0,
+      rapportsGeneres: 0
+    } : {
+      diligencesEnCours: 0,
+      diligencesTerminees: 0,
+      diligencesPlanifiees: 0,
+      diligencesEnRetard: 0,
+      tauxCompletion: 0,
+      evolutionEnCours: 0,
+      evolutionTerminees: 0,
+      mesDocuments: 0,
+      mesRapports: 0
     };
   };
 
@@ -772,7 +859,6 @@ export default function DashboardPage() {
                  {!isAdmin && (
                    <>
                      <th className="text-left p-3 font-semibold text-gray-700">Destinataire</th>
-                     <th className="text-left p-3 font-semibold text-gray-700">Échéance</th>
                    </>
                  )}
                  <th className="text-left p-3 font-semibold text-gray-700">Priorité</th>
@@ -883,14 +969,6 @@ export default function DashboardPage() {
                             <div className={`text-sm ${isEnRetard ? 'text-red-700' : 'text-gray-600'}`}>
                               {destinataireAffichage}
                             </div>
-                          </td>
-                          <td className={`p-3 ${isEnRetard ? 'text-red-700 font-semibold' : 'text-gray-600'}`}>
-                            {dateEcheance}
-                            {isEnRetard && (
-                              <div className="text-xs text-red-500 mt-1">
-                                Échéance dépassée
-                              </div>
-                            )}
                           </td>
                         </>
                       )}

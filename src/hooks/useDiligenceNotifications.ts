@@ -141,9 +141,11 @@ export function useDiligenceNotifications() {
           // Ajouter des notifications pour chaque nouvelle diligence
           userDiligences.forEach((diligence: Diligence) => {
             let message = '';
+            let notificationType: 'info' | 'warning' = 'info';
             
             if (diligence.statut === 'À valider') {
               message = `✅ Diligence à valider: "${diligence.titre}"`;
+              notificationType = 'warning'; // Plus visible pour les validations
             } else {
               message = `📋 Nouvelle diligence: "${diligence.titre}"`;
               if (diligence.directiondestinataire) {
@@ -151,7 +153,7 @@ export function useDiligenceNotifications() {
               }
             }
   
-            addNotification(message, 'info');
+            addNotification(message, notificationType);
           });
   
           // Mettre à jour la date de dernière vérification
@@ -253,7 +255,11 @@ export function useDiligenceNotifications() {
         });
         
         // Vérifier si la diligence est assignée à l'utilisateur courant
-        if (currentUser && String(userId) === String(currentUser.id)) {
+        // Conversion en string pour éviter les problèmes de type (number vs string)
+        const currentUserIdStr = currentUser?.id?.toString();
+        const eventUserIdStr = userId?.toString();
+        
+        if (currentUserIdStr && eventUserIdStr && currentUserIdStr === eventUserIdStr) {
           console.log('✅ Diligence assignée à l\'utilisateur courant, mise à jour du compteur');
           
           // Mettre à jour le compteur de notifications
@@ -287,12 +293,45 @@ export function useDiligenceNotifications() {
       }
     };
 
-    console.log('👂 Démarrage de l\'écouteur d\'événements diligenceAssigned');
+    // Écouter aussi les événements de validation
+    const handleDiligenceValidation = (event: Event) => {
+      try {
+        const customEvent = event as CustomEvent;
+        const { diligenceTitle, diligenceId, status, validatedBy } = customEvent.detail;
+        
+        console.log('🔔 Événement diligenceValidation reçu:', {
+          diligenceTitle,
+          diligenceId,
+          status,
+          validatedBy,
+          currentUserId: currentUser?.id
+        });
+
+        // Si c'est l'utilisateur courant qui a validé, pas de notification
+        if (validatedBy && currentUser && String(validatedBy) === String(currentUser.id)) {
+          console.log('✅ Validation effectuée par l\'utilisateur courant, pas de notification');
+          return;
+        }
+
+        // Notification pour les administrateurs ou responsables
+        if (currentUser?.role?.toLowerCase().includes('admin')) {
+          const message = `✅ Diligence ${status === 'approved' ? 'approuvée' : 'rejetée'}: "${diligenceTitle}"`;
+          addNotification(message, 'success');
+          setNotificationCount(prev => prev + 1);
+        }
+      } catch (error) {
+        console.error('❌ Erreur lors du traitement de l\'événement diligenceValidation:', error);
+      }
+    };
+
+    console.log('👂 Démarrage des écouteurs d\'événements');
     window.addEventListener('diligenceAssigned', handleDiligenceAssigned);
+    window.addEventListener('diligenceValidation', handleDiligenceValidation);
 
     return () => {
-      console.log('👋 Arrêt de l\'écouteur d\'événements diligenceAssigned');
+      console.log('👋 Arrêt des écouteurs d\'événements');
       window.removeEventListener('diligenceAssigned', handleDiligenceAssigned);
+      window.removeEventListener('diligenceValidation', handleDiligenceValidation);
     };
   }, [currentUser, addNotification]);
 

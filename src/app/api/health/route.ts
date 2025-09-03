@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 
-const BACKEND_URL = 'http://localhost:3003/api';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3003/api';
 
 export async function GET() {
   try {
-    const response = await fetch(`${BACKEND_URL}/health`);
+    const response = await fetch(`${BACKEND_URL}/api/health`);
     
     if (!response.ok) {
       return NextResponse.json(

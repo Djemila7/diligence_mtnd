@@ -60,6 +60,8 @@ interface Diligence {
   progression: number;
   created_at: string;
   updated_at: string;
+  created_by?: string | number; // ID de l'utilisateur qui a créé la diligence
+  assigned_to?: string | number; // ID de l'utilisateur assigné
 }
 
 interface User {
@@ -115,25 +117,21 @@ export default function DiligencePage() {
   const [lastLoadTime, setLastLoadTime] = useState<number>(0);
   const { addNotification } = useNotifications();
 
-  // Initialiser les états depuis localStorage et charger les données
+  // Initialiser les états et charger les données
   useEffect(() => {
+    // Nettoyer tous les caches de diligences au démarrage
     if (typeof window !== 'undefined') {
-      // Charger depuis le cache local si disponible et récent (moins de 5 minutes)
-      const cachedData = localStorage.getItem('diligencesCache');
-      const cachedTime = localStorage.getItem('diligencesCacheTime');
-
-      if (cachedData && cachedTime) {
-        const cacheAge = Date.now() - parseInt(cachedTime);
-        if (cacheAge < 300000) { // 5 minutes de cache
-          setAllDiligences(JSON.parse(cachedData));
-          setLastLoadTime(parseInt(cachedTime));
-          setLoading(false);
-          return;
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.includes('diligence')) {
+          keysToRemove.push(key);
         }
       }
+      keysToRemove.forEach(key => localStorage.removeItem(key));
     }
-
-    // Charger les données si pas de cache ou cache expiré
+    
+    // Toujours charger les données depuis le serveur pour avoir les données à jour
     loadDiligences();
     // Charger les utilisateurs et l'utilisateur courant immédiatement
     loadUsers();
@@ -192,11 +190,7 @@ export default function DiligencePage() {
       setAllDiligences(diligencesData);
       setLastLoadTime(Date.now());
 
-      // Sauvegarder dans le cache local
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('diligencesCache', JSON.stringify(diligencesData));
-        localStorage.setItem('diligencesCacheTime', Date.now().toString());
-      }
+      // NE PAS sauvegarder dans le cache local pour éviter les problèmes d'actualisation
     } catch (error) {
       console.error('Erreur lors du chargement des diligences:', error);
       addNotification('Erreur lors du chargement des données', 'error');
@@ -361,8 +355,49 @@ export default function DiligencePage() {
     }
   };
 
-  // Fonction de filtrage
+  // Fonction de filtrage avec restriction par utilisateur
   const filteredDiligences = allDiligences.filter(diligence => {
+    // D'abord, filtrer par utilisateur (sauf pour les administrateurs)
+    const isAdmin = currentUser?.role?.toLowerCase().includes('admin');
+    
+    if (!isAdmin && currentUser) {
+      // Pour les utilisateurs non-administrateurs, ne montrer que leurs propres diligences
+      let userCanSee = false;
+      
+      // Vérifier si l'utilisateur a créé cette diligence
+      if (diligence.created_by && String(diligence.created_by) === String(currentUser.id)) {
+        userCanSee = true;
+      }
+      
+      // Vérifier si l'utilisateur est assigné comme destinataire
+      if (diligence.destinataire && !userCanSee) {
+        try {
+          let destinataireIds: string[] = [];
+          
+          if (typeof diligence.destinataire === 'string') {
+            try {
+              const parsed = JSON.parse(diligence.destinataire);
+              destinataireIds = Array.isArray(parsed) ? parsed.map(String) : [String(parsed)];
+            } catch {
+              destinataireIds = [diligence.destinataire];
+            }
+          } else if (Array.isArray(diligence.destinataire)) {
+            destinataireIds = diligence.destinataire.map(String);
+          }
+          
+          userCanSee = destinataireIds.some(id => String(id) === String(currentUser.id));
+        } catch (error) {
+          console.error('Erreur lors de la vérification des destinataires:', error);
+        }
+      }
+      
+      // Si l'utilisateur ne peut pas voir cette diligence, la filtrer
+      if (!userCanSee) {
+        return false;
+      }
+    }
+    
+    // Appliquer les filtres de recherche habituels
     const matchSearch = !filters.search ||
       diligence.titre.toLowerCase().includes(filters.search.toLowerCase()) ||
       diligence.directiondestinataire.toLowerCase().includes(filters.search.toLowerCase()) ||
@@ -692,8 +727,10 @@ export default function DiligencePage() {
                   </svg>
                 </div>
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total</p>
-                  <p className="text-2xl font-bold text-gray-900">{allDiligences.length}</p>
+                  <p className="text-sm font-medium text-gray-600">
+                    {currentUser?.role?.toLowerCase().includes('admin') ? 'Total' : 'Mes diligences'}
+                  </p>
+                  <p className="text-2xl font-bold text-gray-900">{filteredDiligences.length}</p>
                 </div>
               </div>
             </div>
@@ -707,7 +744,7 @@ export default function DiligencePage() {
                 </div>
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">En cours</p>
-                  <p className="text-2xl font-bold text-blue-600">{allDiligences.filter(d => d.statut === 'En cours').length}</p>
+                  <p className="text-2xl font-bold text-blue-600">{filteredDiligences.filter(d => d.statut === 'En cours').length}</p>
                 </div>
               </div>
             </div>
@@ -721,7 +758,7 @@ export default function DiligencePage() {
                 </div>
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Terminées</p>
-                  <p className="text-2xl font-bold text-green-600">{allDiligences.filter(d => d.statut === 'Terminé').length}</p>
+                  <p className="text-2xl font-bold text-green-600">{filteredDiligences.filter(d => d.statut === 'Terminé').length}</p>
                 </div>
               </div>
             </div>
@@ -735,7 +772,7 @@ export default function DiligencePage() {
                 </div>
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">En retard</p>
-                  <p className="text-2xl font-bold text-red-600">{allDiligences.filter(d => d.statut === 'En retard').length}</p>
+                  <p className="text-2xl font-bold text-red-600">{filteredDiligences.filter(d => d.statut === 'En retard').length}</p>
                 </div>
               </div>
             </div>

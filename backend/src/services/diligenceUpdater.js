@@ -71,7 +71,20 @@ class DiligenceUpdater {
         console.log(`⚠️ ${updateIncorrectlyFinished.changes} diligence(s) remise(s) en cours (terminée avant la date de fin)`);
       }
 
-      console.log('✅ Mise à jour automatique des statuts terminée');
+      // 4. Archivage automatique DÉSACTIVÉ - L'archivage se fait maintenant manuellement
+      // const archiveFinishedDiligences = await database.run(
+      //   `UPDATE diligences
+      //    SET archived = 1, archived_at = datetime('now'), updated_at = datetime('now')
+      //    WHERE statut = 'Terminé'
+      //    AND archived = 0
+      //    AND updated_at <= datetime('now', '-1 day')`
+      // );
+
+      // if (archiveFinishedDiligences.changes > 0) {
+      //   console.log(`✅ ${archiveFinishedDiligences.changes} diligence(s) terminée(s) archivée(s) automatiquement`);
+      // }
+
+      console.log('✅ Mise à jour automatique des statuts terminée (archivage automatique désactivé)');
 
     } catch (error) {
       console.error('❌ Erreur lors de la mise à jour automatique des statuts:', error);

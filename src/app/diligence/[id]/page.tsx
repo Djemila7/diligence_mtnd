@@ -6,6 +6,16 @@ import Link from "next/link";
 import Sidebar from "@/components/Sidebar";
 import { apiClient } from "@/lib/api/client";
 import DiligenceValidation from "@/components/DiligenceValidation";
+import TraitementsDisplay from "@/components/Diligence/TraitementsDisplay";
+
+interface Traitement {
+  id: number;
+  diligence_id: number;
+  commentaire: string;
+  progression: number;
+  statut: "En cours" | "Terminé" | "À valider";
+  created_at: string;
+}
 
 interface Diligence {
   id: number;
@@ -25,6 +35,16 @@ interface Diligence {
   assigned_name?: string;
   created_by_name?: string;
   created_by?: number;
+  traitements?: Traitement[];
+  archived?: boolean;
+  archived_at?: string;
+}
+
+interface DiligenceFile {
+  type: 'original' | 'traitement';
+  filePath: string;
+  fileName: string;
+  uploadedAt?: string;
 }
 
 interface User {
@@ -45,6 +65,10 @@ export default function DiligenceDetailPage() {
   const [statusUpdated, setStatusUpdated] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [traitements, setTraitements] = useState<Traitement[]>([]);
+  const [loadingTraitements, setLoadingTraitements] = useState(false);
+  const [allFiles, setAllFiles] = useState<DiligenceFile[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
 
   // Fonction pour sauvegarder la diligence dans le cache local
   const saveDiligenceToCache = (diligenceData: Diligence) => {
@@ -130,12 +154,44 @@ export default function DiligenceDetailPage() {
       }
     };
 
+    const fetchDiligenceFiles = async () => {
+      try {
+        setLoadingFiles(true);
+        const files = await apiClient.getDiligenceFiles(diligenceId);
+        setAllFiles(files);
+      } catch (err) {
+        console.error("Erreur lors du chargement des fichiers:", err);
+      } finally {
+        setLoadingFiles(false);
+      }
+    };
+
     if (diligenceId) {
       fetchDiligence();
       fetchUsers();
       fetchCurrentUser();
+      fetchDiligenceFiles();
     }
   }, [diligenceId, refreshTrigger]);
+
+  // Récupérer les traitements lorsque la diligence est à valider
+  useEffect(() => {
+    const fetchTraitements = async () => {
+      if (diligence && diligence.statut === "À valider") {
+        try {
+          setLoadingTraitements(true);
+          const traitementsData = await apiClient.getDiligenceTraitements(diligence.id);
+          setTraitements(traitementsData);
+        } catch (error) {
+          console.error("Erreur lors du chargement des traitements:", error);
+        } finally {
+          setLoadingTraitements(false);
+        }
+      }
+    };
+
+    fetchTraitements();
+  }, [diligence]);
 
   // Vérifier si l'utilisateur courant est un destinataire de la diligence
   const isCurrentUserRecipient = (diligence: Diligence, currentUser: User | null): boolean => {
@@ -281,8 +337,14 @@ export default function DiligenceDetailPage() {
     // Vérifier si l'utilisateur est un destinataire
     const isRecipient = isCurrentUserRecipient(diligence, currentUser);
     
-    // Les destinataires ne peuvent pas modifier
-    if (isRecipient) return false;
+    // Les destinataires ne peuvent pas modifier, et si la diligence est "Terminé", bloquer complètement
+    if (isRecipient) {
+      // Vérification supplémentaire : si la diligence est "Terminé", bloquer l'accès même pour les destinataires
+      if (diligence.statut === 'Terminé') {
+        return false;
+      }
+      return false;
+    }
     
     // Pour les autres utilisateurs (créateur ou autres), permettre la modification
     return true;
@@ -298,8 +360,14 @@ export default function DiligenceDetailPage() {
     // Vérifier si l'utilisateur est un destinataire
     const isRecipient = isCurrentUserRecipient(diligence, currentUser);
     
-    // Les destinataires ne peuvent pas supprimer
-    if (isRecipient) return false;
+    // Les destinataires ne peuvent pas supprimer, et si la diligence est "Terminé", bloquer complètement
+    if (isRecipient) {
+      // Vérification supplémentaire : si la diligence est "Terminé", bloquer l'accès même pour les destinataires
+      if (diligence.statut === 'Terminé') {
+        return false;
+      }
+      return false;
+    }
     
     // Pour les autres utilisateurs (créateur ou autres), permettre la suppression
     return true;
@@ -636,22 +704,61 @@ export default function DiligenceDetailPage() {
             </div>
           </div>
 
-          {/* Pièces jointes */}
-          {diligence.piecesjointes && getPiecesJointes(diligence).length > 0 && (
+          {/* Tous les fichiers (pièces jointes originales + fichiers des traitements) */}
+          {(diligence.piecesjointes && getPiecesJointes(diligence).length > 0) || allFiles.length > 0 ? (
             <div>
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">Pièces jointes</h3>
-              <div className="space-y-2">
-                {getPiecesJointes(diligence).map((piece: string, index: number) => (
-                  <div key={index} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg border border-gray-200">
-                    <span className="text-gray-800 text-sm">{piece}</span>
-                    <button className="text-orange-600 hover:text-orange-800 text-sm font-medium">
-                      Télécharger
-                    </button>
-                  </div>
-                ))}
-              </div>
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">
+                {allFiles.length > 0 ? 'Tous les fichiers' : 'Pièces jointes'}
+              </h3>
+              
+              {loadingFiles ? (
+                <div className="text-center py-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-orange-500 mx-auto"></div>
+                  <p className="text-gray-600 text-sm mt-2">Chargement des fichiers...</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {allFiles.map((file: DiligenceFile, index: number) => {
+                    const fileName = file.fileName || file.filePath.split('/').pop() || 'Fichier';
+                    const isPDF = fileName.toLowerCase().endsWith('.pdf');
+                    
+                    return (
+                      <div key={index} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg border border-gray-200">
+                        <div className="flex items-center space-x-2">
+                          {isPDF ? (
+                            <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                          ) : (
+                            <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                          )}
+                          <div>
+                            <span className="text-gray-800 text-sm block">{fileName}</span>
+                            <span className="text-gray-500 text-xs">
+                              {file.type === 'original' ? 'Pièce jointe originale' : 'Fichier de traitement'}
+                              {file.uploadedAt && ` • ${new Date(file.uploadedAt).toLocaleDateString('fr-FR')}`}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            // Télécharger le fichier via l'API - utiliser le chemin complet
+                            const downloadUrl = `/api/files/download?filePath=${encodeURIComponent(file.filePath)}&fileName=${encodeURIComponent(fileName)}`;
+                            window.open(downloadUrl, '_blank');
+                          }}
+                          className="text-orange-600 hover:text-orange-800 text-sm font-medium"
+                        >
+                          {isPDF ? 'Voir' : 'Télécharger'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Actions */}
@@ -675,9 +782,6 @@ export default function DiligenceDetailPage() {
                     Modifier
                   </Link>
                 )}
-                <button className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-2 rounded-lg font-medium transition-colors">
-                  Historique
-                </button>
                 {canDeleteDiligence(diligence, currentUser) && (
                   <button
                     onClick={confirmDelete}
@@ -696,6 +800,7 @@ export default function DiligenceDetailPage() {
           diligenceId={diligence.id}
           isCreator={diligence.created_by === parseInt(currentUser?.id || '0') || currentUser?.role === 'admin'}
           currentStatus={diligence.statut}
+          isArchived={diligence.archived === true}
           onValidationComplete={() => {
             // Supprimer le cache local pour forcer le rechargement des données fraîches
             if (typeof window !== 'undefined') {
@@ -704,6 +809,39 @@ export default function DiligenceDetailPage() {
             setRefreshTrigger(prev => prev + 1);
           }}
         />
+        
+
+        {/* Bouton pour consulter les archives si la diligence est terminée ou archivée */}
+        {(diligence.statut === 'Terminé' || diligence.archived === true) && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mt-6">
+            <h3 className="text-lg font-semibold text-blue-800 mb-3">
+              {diligence.archived === true ? '📁 Diligence archivée' : '✅ Diligence terminée'}
+            </h3>
+            <p className="text-blue-700 mb-4">
+              {diligence.archived === true
+                ? 'Cette diligence a été archivée. Vous pouvez consulter toutes vos diligences archivées dans la section dédiée.'
+                : 'Cette diligence est terminée. Vous pouvez consulter toutes vos diligences archivées dans la section dédiée.'
+              }
+            </p>
+            <button
+              onClick={() => window.location.href = '/archives'}
+              className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+              </svg>
+              Voir l'archivage
+            </button>
+          </div>
+        )}
+
+        {/* Affichage des traitements lorsque la diligence est à valider */}
+        {diligence.statut === "À valider" && (
+          <TraitementsDisplay
+            traitements={traitements}
+            loading={loadingTraitements}
+          />
+        )}
       </div>
 
       {/* Modal de confirmation de suppression */}

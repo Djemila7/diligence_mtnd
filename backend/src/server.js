@@ -924,6 +924,95 @@ app.get('/api/diligences', async (req, res) => {
   }
 });
 
+// Route pour récupérer les diligences archivées
+app.get('/api/diligences/archives', authenticateToken, async (req, res) => {
+  try {
+    const database = await getDatabase();
+    const currentUserId = req.user.id;
+    const currentUserRole = req.user.role;
+    
+    // Récupérer les diligences archivées avec les informations des utilisateurs
+    let query = `
+      SELECT d.*, u.name as assigned_name, u.direction as assigned_direction,
+             creator.name as created_by_name, creator.direction as created_by_direction,
+             va.archived_at, va.archived_by,
+             archiver.name as archived_by_name
+      FROM diligences d
+      LEFT JOIN users u ON d.assigned_to = u.id
+      LEFT JOIN users creator ON d.created_by = creator.id
+      LEFT JOIN diligence_archives va ON d.id = va.diligence_id
+      LEFT JOIN users archiver ON va.archived_by = archiver.id
+      WHERE d.archived = 1
+    `;
+    
+    // Si l'utilisateur n'est pas admin, filtrer pour ne voir que ses propres diligences
+    if (currentUserRole !== 'admin') {
+      query += ` AND (
+        d.created_by = ?
+        OR d.assigned_to = ?
+        OR d.destinataire LIKE '%' || ? || '%'
+        OR d.destinataire LIKE '%' || ? || '%'
+      )`;
+    }
+    
+    query += ` ORDER BY d.archived_at DESC`;
+    
+    const archivedDiligences = currentUserRole === 'admin'
+      ? await database.all(query)
+      : await database.all(query, [currentUserId, currentUserId, currentUserId, currentUserId]);
+
+    // Convertir les IDs des destinataires en noms d'utilisateurs
+    const usersList = await database.all('SELECT id, name, email FROM users WHERE is_active = 1');
+    
+    const diligencesWithDestinataireNames = archivedDiligences.map(diligence => {
+      let destinataireDetails = [];
+      
+      if (diligence.destinataire) {
+        try {
+          let destinataireIds = [];
+          
+          if (typeof diligence.destinataire === 'string') {
+            try {
+              const parsed = JSON.parse(diligence.destinataire);
+              destinataireIds = Array.isArray(parsed) ? parsed : [parsed];
+            } catch {
+              destinataireIds = [diligence.destinataire];
+            }
+          } else if (Array.isArray(diligence.destinataire)) {
+            destinataireIds = diligence.destinataire;
+          }
+          
+          // Filtrer les IDs problématiques avant de mapper
+          const validDestinataireIds = destinataireIds.filter(id =>
+            id !== '[object Object]' &&
+            id !== 'Utilisateur [object Object]' &&
+            id !== null &&
+            id !== undefined
+          );
+          
+          destinataireDetails = validDestinataireIds.map(id => {
+            const user = usersList.find(u => u.id == id);
+            return user ? { id: user.id, name: user.name, email: user.email } : { id, name: `Utilisateur ${id}` };
+          });
+        } catch (error) {
+          console.error('Erreur lors de la conversion des destinataires:', error);
+        }
+      }
+      
+      return {
+        ...diligence,
+        created_by: diligence.created_by,
+        destinataire_details: destinataireDetails
+      };
+    });
+
+    res.json(diligencesWithDestinataireNames);
+  } catch (error) {
+    console.error('Erreur lors de la récupération des diligences archivées:', error);
+    res.status(500).json({ error: 'Erreur interne du serveur' });
+  }
+});
+
 // Route pour obtenir une diligence spécifique
 app.get('/api/diligences/:id', async (req, res) => {
   const { id } = req.params;
@@ -1245,15 +1334,29 @@ app.put('/api/diligences/:id', authenticateToken, async (req, res) => {
         }
       }
       
-      // Les destinataires ne peuvent pas modifier les diligences
+      // Les destinataires ne peuvent PAS modifier les diligences (même s'ils ne sont pas terminées)
       if (isRecipient) {
         return res.status(403).json({
           error: 'Accès refusé : les destinataires ne peuvent pas modifier les diligences'
         });
       }
       
-      // Pour les autres utilisateurs (créateur ou autres), permettre la modification
-      // Note: Le créateur peut modifier car il n'est pas destinataire
+      // Seuls les administrateurs et le créateur peuvent modifier
+      // Vérifier si l'utilisateur est le créateur
+      const isCreator = parseInt(diligence.created_by) === parseInt(currentUserId);
+      
+      if (!isCreator && currentUserRole !== 'admin') {
+        return res.status(403).json({
+          error: 'Accès refusé : seuls les administrateurs et le créateur peuvent modifier les diligences'
+        });
+      }
+      
+      // Vérification supplémentaire : si la diligence est "Terminé", bloquer l'accès même pour le créateur
+      if (diligence.statut === 'Terminé') {
+        return res.status(403).json({
+          error: 'Accès refusé : les diligences terminées ne peuvent pas être modifiées'
+        });
+      }
     }
 
     await database.run(
@@ -1332,15 +1435,29 @@ app.delete('/api/diligences/:id', authenticateToken, async (req, res) => {
         }
       }
       
-      // Les destinataires ne peuvent pas supprimer les diligences
+      // Les destinataires ne peuvent PAS supprimer les diligences (même s'ils ne sont pas terminées)
       if (isRecipient) {
         return res.status(403).json({
           error: 'Accès refusé : les destinataires ne peuvent pas supprimer les diligences'
         });
       }
       
-      // Pour les autres utilisateurs (créateur ou autres), permettre la suppression
-      // Note: Le créateur peut supprimer car il n'est pas destinataire
+      // Seuls les administrateurs et le créateur peuvent supprimer
+      // Vérifier si l'utilisateur est le créateur
+      const isCreator = parseInt(diligence.created_by) === parseInt(currentUserId);
+      
+      if (!isCreator && currentUserRole !== 'admin') {
+        return res.status(403).json({
+          error: 'Accès refusé : seuls les administrateurs et le créateur peuvent supprimer les diligences'
+        });
+      }
+      
+      // Vérification supplémentaire : si la diligence est "Terminé", bloquer l'accès même pour le créateur
+      if (diligence.statut === 'Terminé') {
+        return res.status(403).json({
+          error: 'Accès refusé : les diligences terminées ne peuvent pas être supprimées'
+        });
+      }
     }
 
     await database.run(
@@ -1372,6 +1489,43 @@ app.post('/api/diligences/update-statuses', async (req, res) => {
     console.error('Erreur lors de la mise à jour forcée des statuts:', error);
     res.status(500).json({
       error: 'Erreur interne du serveur lors de la mise à jour des statuts'
+    });
+  }
+});
+
+// Route pour forcer l'archivage automatique des diligences terminées (admin seulement)
+app.post('/api/diligences/archive-finished', authenticateToken, async (req, res) => {
+  try {
+    // Vérifier que l'utilisateur est administrateur
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Accès réservé aux administrateurs'
+      });
+    }
+
+    const database = await getDatabase();
+    
+    // Archiver les diligences terminées depuis plus de 24 heures
+    const result = await database.run(
+      `UPDATE diligences
+       SET archived = 1, archived_at = datetime('now'), updated_at = datetime('now')
+       WHERE statut = 'Terminé'
+       AND archived = 0
+       AND updated_at <= datetime('now', '-1 day')`
+    );
+
+    res.json({
+      success: true,
+      message: `${result.changes} diligence(s) terminée(s) archivée(s) avec succès`,
+      archivedCount: result.changes
+    });
+
+  } catch (error) {
+    console.error('❌ Erreur lors de l\'archivage automatique des diligences:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erreur interne du serveur lors de l\'archivage'
     });
   }
 });
@@ -1529,13 +1683,104 @@ app.post('/api/diligences/:id/traitement', authenticateToken, upload.array('fich
   }
 });
 
+// Route pour récupérer les traitements d'une diligence
+app.get('/api/diligences/:id/traitements', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const database = await getDatabase();
+    
+    // Récupérer tous les traitements de la diligence
+    const traitements = await database.all(`
+      SELECT id, diligence_id, commentaire, progression, statut, created_at
+      FROM diligence_traitements
+      WHERE diligence_id = ?
+      ORDER BY created_at DESC
+    `, [id]);
+    
+    res.json(traitements);
+    
+  } catch (error) {
+    console.error('❌ Erreur lors de la récupération des traitements:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erreur interne du serveur lors de la récupération des traitements'
+    });
+  }
+});
+
+// Route pour récupérer tous les fichiers d'une diligence (pièces jointes + fichiers des traitements)
+app.get('/api/diligences/:id/files', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const database = await getDatabase();
+    
+    // Récupérer les pièces jointes originales de la diligence
+    const diligence = await database.get(
+      'SELECT piecesjointes FROM diligences WHERE id = ?',
+      [id]
+    );
+    
+    let allFiles = [];
+    
+    // Ajouter les pièces jointes originales
+    if (diligence && diligence.piecesjointes) {
+      try {
+        const piecesJointes = JSON.parse(diligence.piecesjointes);
+        if (Array.isArray(piecesJointes)) {
+          allFiles = piecesJointes.map(filePath => ({
+            type: 'original',
+            filePath: filePath,
+            fileName: filePath.split('/').pop() || filePath,
+            uploadedAt: null
+          }));
+        }
+      } catch (error) {
+        console.error('Erreur lors du parsing des pièces jointes:', error);
+      }
+    }
+    
+    // Récupérer les fichiers des traitements
+    const traitementFiles = await database.all(`
+      SELECT file_name, file_path, uploaded_at
+      FROM diligence_files
+      WHERE diligence_id = ?
+      ORDER BY uploaded_at DESC
+    `, [id]);
+    
+    // Ajouter les fichiers des traitements
+    const traitementFilesFormatted = traitementFiles.map(file => ({
+      type: 'traitement',
+      filePath: file.file_path,
+      fileName: file.file_name,
+      uploadedAt: file.uploaded_at
+    }));
+    
+    // Combiner tous les fichiers
+    const combinedFiles = [...allFiles, ...traitementFilesFormatted];
+    
+    res.json(combinedFiles);
+    
+  } catch (error) {
+    console.error('❌ Erreur lors de la récupération des fichiers:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erreur interne du serveur lors de la récupération des fichiers'
+    });
+  }
+});
+
 // Route pour valider ou rejeter une diligence
 app.post('/api/diligences/:id/validate', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { validation_status, comment } = req.body;
     
+    console.log('🔍 Validation de diligence - Données reçues:', { id, validation_status, comment });
+    
     if (!validation_status || !['approved', 'rejected'].includes(validation_status)) {
+      console.log('❌ Erreur de validation: statut manquant ou invalide');
       return res.status(400).json({
         success: false,
         error: 'Statut de validation requis (approved ou rejected)'
@@ -1582,11 +1827,20 @@ app.post('/api/diligences/:id/validate', authenticateToken, async (req, res) => 
       [id, req.user.id, validation_status, comment || null]
     );
 
-    // Mettre à jour le statut de la diligence
+    // Mettre à jour le statut de la diligence (archivage manuel désormais)
     const newStatut = validation_status === 'approved' ? 'Terminé' : 'En cours';
+    
+    // Mettre à jour seulement le statut, sans archiver automatiquement
     await database.run(
       `UPDATE diligences SET statut = ?, updated_at = datetime('now') WHERE id = ?`,
       [newStatut, id]
+    );
+    
+    // Enregistrer la validation dans la table d'archivage (mais sans archiver la diligence)
+    await database.run(
+      `INSERT INTO diligence_validations (diligence_id, validated_by, validation_status, comment, validated_at)
+       VALUES (?, ?, ?, ?, datetime('now'))`,
+      [id, req.user.id, validation_status, comment || null]
     );
 
     // Envoyer une notification email au destinataire
@@ -1671,6 +1925,159 @@ app.post('/api/diligences/:id/validate', authenticateToken, async (req, res) => 
   }
 });
 
+// Route pour archiver manuellement une diligence
+app.post('/api/diligences/:id/archive', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const database = await getDatabase();
+    
+    // Vérifier si la diligence existe et récupérer ses informations
+    const diligence = await database.get(`
+      SELECT d.*, creator.name as created_by_name
+      FROM diligences d
+      LEFT JOIN users creator ON d.created_by = creator.id
+      WHERE d.id = ?
+    `, [id]);
+    
+    if (!diligence) {
+      return res.status(404).json({
+        success: false,
+        error: 'Diligence non trouvée'
+      });
+    }
+    
+    // Vérifier que la diligence est terminée
+    if (diligence.statut !== 'Terminé') {
+      return res.status(400).json({
+        success: false,
+        error: 'Seules les diligences terminées peuvent être archivées'
+      });
+    }
+    
+    // Vérifier que l'utilisateur est le créateur de la diligence ou un administrateur
+    if (diligence.created_by !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Seul le créateur de la diligence ou un administrateur peut l\'archiver'
+      });
+    }
+    
+    // Vérifier que la diligence n'est pas déjà archivée
+    if (diligence.archived === 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cette diligence est déjà archivée'
+      });
+    }
+    
+    // Archiver la diligence
+    await database.run(
+      `UPDATE diligences SET archived = 1, archived_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+      [id]
+    );
+    
+    // Enregistrer dans la table d'archivage
+    await database.run(
+      `INSERT INTO diligence_archives (diligence_id, archived_by, archived_at)
+       VALUES (?, ?, datetime('now'))`,
+      [id, req.user.id]
+    );
+    
+    res.json({
+      success: true,
+      message: 'Diligence archivée avec succès'
+    });
+    
+  } catch (error) {
+    console.error('❌ Erreur lors de l\'archivage manuel de la diligence:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erreur interne du serveur lors de l\'archivage'
+    });
+  }
+});
+
+
+// Route pour télécharger les fichiers
+app.get('/api/files/download', async (req, res) => {
+  const { filePath, fileName } = req.query;
+  
+  if (!filePath) {
+    return res.status(400).json({
+      error: 'Chemin du fichier requis'
+    });
+  }
+
+  try {
+    // Construire le chemin complet du fichier
+    const uploadsDir = path.join(__dirname, '../../uploads');
+    const fullPath = path.join(uploadsDir, filePath);
+    
+    // Vérifier que le chemin est sécurisé (empêcher les attaques de traversal)
+    if (!fullPath.startsWith(uploadsDir)) {
+      return res.status(403).json({
+        error: 'Accès non autorisé au fichier'
+      });
+    }
+
+    // Vérifier si le fichier existe
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({
+        error: 'Fichier non trouvé'
+      });
+    }
+
+    // Déterminer le type MIME en fonction de l'extension
+    const ext = path.extname(fullPath).toLowerCase();
+    let contentType = 'application/octet-stream';
+    
+    if (ext === '.pdf') {
+      contentType = 'application/pdf';
+    } else if (ext === '.jpg' || ext === '.jpeg') {
+      contentType = 'image/jpeg';
+    } else if (ext === '.png') {
+      contentType = 'image/png';
+    } else if (ext === '.gif') {
+      contentType = 'image/gif';
+    } else if (ext === '.doc') {
+      contentType = 'application/msword';
+    } else if (ext === '.docx') {
+      contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    } else if (ext === '.xls') {
+      contentType = 'application/vnd.ms-excel';
+    } else if (ext === '.xlsx') {
+      contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    } else if (ext === '.txt') {
+      contentType = 'text/plain';
+    }
+
+    // Définir le nom du fichier pour le téléchargement
+    const downloadName = fileName || path.basename(fullPath);
+    
+    // Configurer les en-têtes pour le téléchargement
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(downloadName)}"`);
+    
+    // Envoyer le fichier
+    const fileStream = fs.createReadStream(fullPath);
+    fileStream.pipe(res);
+    
+    fileStream.on('error', (error) => {
+      console.error('Erreur lors de l\'envoi du fichier:', error);
+      res.status(500).json({
+        error: 'Erreur lors de l\'envoi du fichier'
+      });
+    });
+
+  } catch (error) {
+    console.error('Erreur lors du téléchargement du fichier:', error);
+    res.status(500).json({
+      error: 'Erreur interne du serveur'
+    });
+  }
+});
+
 // Gestion des erreurs 404
 app.use('*', (req, res) => {
   res.status(404).json({
@@ -1695,6 +2102,7 @@ app.listen(PORT, () => {
   console.log(`👥 API Utilisateurs: http://localhost:${PORT}/api/users`);
   console.log(`📋 API Diligences: http://localhost:${PORT}/api/diligences`);
   console.log(`👁️  API Mark Viewed: http://localhost:${PORT}/api/diligences/:id/mark-viewed`);
+  console.log(`📝 API Traitements: http://localhost:${PORT}/api/diligences/:id/traitements`);
 });
 
 export default app;

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3003/api';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3003/api';
 
 export async function GET(
   request: Request,
@@ -20,7 +20,7 @@ export async function GET(
       headers.Authorization = authHeader;
     }
 
-    const response = await fetch(`${BACKEND_URL}/diligences/${id}`, {
+    const response = await fetch(`${BACKEND_URL}/api/diligences/${id}`, {
       method: 'GET',
       headers,
     });
@@ -51,7 +51,7 @@ export async function PUT(
     const id = params.id;
     const diligenceData = await request.json();
 
-    const response = await fetch(`${BACKEND_URL}/diligences/${id}`, {
+    const response = await fetch(`${BACKEND_URL}/api/diligences/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -95,7 +95,7 @@ export async function DELETE(
       headers.Authorization = authHeader;
     }
 
-    const response = await fetch(`${BACKEND_URL}/diligences/${id}`, {
+    const response = await fetch(`${BACKEND_URL}/api/diligences/${id}`, {
       method: 'DELETE',
       headers,
     });

@@ -18,6 +18,7 @@ interface DetailsDiligenceProps {
   progression: number;
   created_by?: number;
   currentUserId?: number;
+  archived?: boolean;
   onValidationComplete?: () => void;
 }
 
@@ -36,6 +37,7 @@ const DetailsDiligence: FC<DetailsDiligenceProps> = ({
   progression,
   created_by,
   currentUserId,
+  archived,
   onValidationComplete,
 }) => {
   const router = useRouter();
@@ -193,6 +195,25 @@ const DetailsDiligence: FC<DetailsDiligenceProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Bouton pour consulter les archives si la diligence est terminée */}
+        {status === "termine" && (
+          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <h3 className="text-lg font-semibold text-blue-800 mb-3">📁 Diligence archivée</h3>
+            <p className="text-blue-700 mb-4">
+              Cette diligence a été terminée et archivée. Vous pouvez consulter toutes les diligences archivées dans la section dédiée.
+            </p>
+            <button
+              onClick={() => router.push('/archives')}
+              className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+              </svg>
+              Consulter les archives
+            </button>
           </div>
         )}
       </div>

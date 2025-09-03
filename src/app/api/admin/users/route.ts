@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3003/api';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3003/api';
 
 export async function GET() {
   try {
-    const response = await fetch(`${BACKEND_URL}/users`, {
+    const response = await fetch(`${BACKEND_URL}/api/users`, {
       headers: {
         'Content-Type': 'application/json',
       },
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   try {
     const userData = await request.json();
     
-    const response = await fetch(`${BACKEND_URL}/users`, {
+    const response = await fetch(`${BACKEND_URL}/api/users`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -63,7 +63,7 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
 
-    const response = await fetch(`${BACKEND_URL}/users/${id}`, {
+    const response = await fetch(`${BACKEND_URL}/api/users/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -95,7 +95,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
 
-    const response = await fetch(`${BACKEND_URL}/users/${userId}`, {
+    const response = await fetch(`${BACKEND_URL}/api/users/${userId}`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3003/api';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3003/api';
 
 export async function POST(
   request: NextRequest,
@@ -21,19 +21,11 @@ export async function POST(
       headers.Authorization = authHeader;
     }
 
-    // Déterminer le nouveau statut basé sur la validation
-    const newStatus = validation_status === 'approved' ? 'Terminé' : 'En cours';
-    
-    // Mettre à jour la diligence dans le backend
-    const diligenceData = {
-      statut: newStatus,
-      // Conserver le commentaire de validation si nécessaire
-    };
-
-    const response = await fetch(`${BACKEND_URL}/diligences/${id}`, {
-      method: 'PUT',
+    // Utiliser l'endpoint de validation dédié du backend
+    const response = await fetch(`${BACKEND_URL}/api/diligences/${id}/validate`, {
+      method: 'POST',
       headers,
-      body: JSON.stringify(diligenceData),
+      body: JSON.stringify({ validation_status, comment }),
     });
 
     if (!response.ok) {
@@ -41,12 +33,15 @@ export async function POST(
     }
 
     const result = await response.json();
+    
+    // Déterminer le nouveau statut basé sur la validation
+    const newStatus = validation_status === 'approved' ? 'Terminé' : 'En cours';
 
     // Envoyer une notification au destinataire si la diligence est rejetée
     if (validation_status === 'rejected') {
       try {
         // Récupérer les informations de la diligence
-        const diligenceResponse = await fetch(`${BACKEND_URL}/diligences/${id}`, {
+        const diligenceResponse = await fetch(`${BACKEND_URL}/api/diligences/${id}`, {
           method: 'GET',
           headers,
         });
@@ -70,7 +65,7 @@ export async function POST(
             }
             
             // Récupérer les emails des destinataires
-            const usersResponse = await fetch(`${BACKEND_URL}/users`, {
+            const usersResponse = await fetch(`${BACKEND_URL}/api/users`, {
               method: 'GET',
               headers,
             });
@@ -86,7 +81,7 @@ export async function POST(
               // Envoyer des notifications aux destinataires
               for (const destinataire of destinataires) {
                 if (destinataire.email) {
-                  const emailResponse = await fetch(`${BACKEND_URL}/smtp/send-notification`, {
+                  const emailResponse = await fetch(`${BACKEND_URL}/api/smtp/send-notification`, {
                     method: 'POST',
                     headers: {
                       'Content-Type': 'application/json',

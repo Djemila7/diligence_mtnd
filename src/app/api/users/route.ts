@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3003/api';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3003/api';
 
 export async function GET(request: Request) {
   try {
@@ -15,7 +15,7 @@ export async function GET(request: Request) {
       headers.Authorization = authHeader;
     }
 
-    const response = await fetch(`${BACKEND_URL}/users`, {
+    const response = await fetch(`${BACKEND_URL}/api/users`, {
       method: 'GET',
       headers,
     });

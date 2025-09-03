@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS diligences (
     progression INTEGER DEFAULT 0,
     assigned_to INTEGER,
     created_by INTEGER,
+    archived BOOLEAN DEFAULT 0,
+    archived_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (assigned_to) REFERENCES users(id),
@@ -154,3 +156,20 @@ CREATE TABLE IF NOT EXISTS diligence_validations (
 
 CREATE INDEX IF NOT EXISTS idx_validations_diligence ON diligence_validations(diligence_id);
 CREATE INDEX IF NOT EXISTS idx_validations_user ON diligence_validations(validated_by);
+
+-- Table d'archivage des diligences (pour historique des validations)
+CREATE TABLE IF NOT EXISTS diligence_archives (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    diligence_id INTEGER NOT NULL,
+    validated_by INTEGER NOT NULL,
+    validation_status TEXT NOT NULL CHECK(validation_status IN ('approved', 'rejected')),
+    comment TEXT,
+    validated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    archived_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (diligence_id) REFERENCES diligences(id) ON DELETE CASCADE,
+    FOREIGN KEY (validated_by) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_archives_diligence ON diligence_archives(diligence_id);
+CREATE INDEX IF NOT EXISTS idx_archives_user ON diligence_archives(validated_by);
+CREATE INDEX IF NOT EXISTS idx_diligences_archived ON diligences(archived);

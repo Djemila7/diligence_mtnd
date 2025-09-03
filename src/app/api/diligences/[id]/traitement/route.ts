@@ -3,7 +3,7 @@ import { writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3003/api';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3003/api';
 
 export async function POST(
   request: NextRequest,
@@ -77,7 +77,7 @@ export async function POST(
       backendFormData.append('fichiers', file);
     });
 
-    const response = await fetch(`${BACKEND_URL}/diligences/${id}/traitement`, {
+    const response = await fetch(`${BACKEND_URL}/api/diligences/${id}/traitement`, {
       method: 'POST',
       headers: {
         'Authorization': headers.Authorization || '',
@@ -94,7 +94,7 @@ export async function POST(
     // 3. Envoyer un email de notification à l'émetteur
     try {
       // Récupérer les informations de l'émetteur depuis la diligence
-      const diligenceResponse = await fetch(`${BACKEND_URL}/diligences/${id}`, {
+      const diligenceResponse = await fetch(`${BACKEND_URL}/api/diligences/${id}`, {
         method: 'GET',
         headers,
       });
@@ -105,7 +105,7 @@ export async function POST(
         
         if (createdBy) {
           // Récupérer l'email de l'émetteur
-          const userResponse = await fetch(`${BACKEND_URL}/users`, {
+          const userResponse = await fetch(`${BACKEND_URL}/api/users`, {
             method: 'GET',
             headers,
           });
@@ -116,7 +116,7 @@ export async function POST(
             
             if (emetteur && emetteur.email) {
               // Envoyer l'email de notification directement via l'API backend
-              const emailResponse = await fetch(`${BACKEND_URL}/smtp/send-notification`, {
+              const emailResponse = await fetch(`${BACKEND_URL}/api/smtp/send-notification`, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',

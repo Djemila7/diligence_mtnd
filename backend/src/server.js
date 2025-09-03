@@ -935,13 +935,13 @@ app.get('/api/diligences/archives', authenticateToken, async (req, res) => {
     let query = `
       SELECT d.*, u.name as assigned_name, u.direction as assigned_direction,
              creator.name as created_by_name, creator.direction as created_by_direction,
-             va.archived_at, va.archived_by,
+             va.validated_at as archived_at, va.validated_by as archived_by,
              archiver.name as archived_by_name
       FROM diligences d
       LEFT JOIN users u ON d.assigned_to = u.id
       LEFT JOIN users creator ON d.created_by = creator.id
       LEFT JOIN diligence_archives va ON d.id = va.diligence_id
-      LEFT JOIN users archiver ON va.archived_by = archiver.id
+      LEFT JOIN users archiver ON va.validated_by = archiver.id
       WHERE d.archived = 1
     `;
     
@@ -1979,8 +1979,8 @@ app.post('/api/diligences/:id/archive', authenticateToken, async (req, res) => {
     
     // Enregistrer dans la table d'archivage
     await database.run(
-      `INSERT INTO diligence_archives (diligence_id, archived_by, archived_at)
-       VALUES (?, ?, datetime('now'))`,
+      `INSERT INTO diligence_archives (diligence_id, validated_by, validated_at, validation_status)
+       VALUES (?, ?, datetime('now'), 'approved')`,
       [id, req.user.id]
     );
     
